@@ -644,6 +644,13 @@
   }
   /* широкие табличные окна (словарь терминов): меньше переносов в строках */
   .modal.wide .box { max-width: 1200px; }
+  /* окно словаря — колонка фиксированной высоты: список занимает свободное
+     место и прокручивается внутри, а «Проверить текст», поле ввода и строка
+     «замен нет» всегда остаются внутри окна и не уезжают за нижний край */
+  .modal.wide .box { display: flex; flex-direction: column; height: 80vh; }
+  .modal.wide #modal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .modal.wide #modal-body > :not(.gl-table-wrap) { flex: none; }
+  .modal.wide .gl-table-wrap { flex: 0 1 auto; min-height: 110px; max-height: none; }
   .modal h1 { font-size: 20px; margin: 0 0 14px; }
   .modal h2 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
   .modal p, .modal li { color: #cccccc; font-size: 14px; }
