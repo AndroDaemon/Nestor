@@ -15,7 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import webview
+try:  # the GUI backend is only needed to actually open the desktop window;
+    import webview  # noqa: F401  (kept importable so tests run headless)
+except ImportError:  # pragma: no cover - exercised only without pywebview
+    webview = None  # type: ignore[assignment]
 
 from .library import Library
 

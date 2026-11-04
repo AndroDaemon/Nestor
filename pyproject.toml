@@ -21,7 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# httpx2 backs fastapi.testclient (used by the web tests). The desktop window's
+# GUI backend (pywebview) is imported lazily, so it is not needed to run tests.
+dev = ["pytest>=8.0", "httpx2"]
 
 [project.urls]
 Homepage = "https://github.com/AndroDaemon/Nestor"
