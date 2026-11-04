@@ -366,14 +366,17 @@
     padding: 7px 12px; border-bottom: 1px solid var(--line-2);
   }
   .gl-table thead th.gl-col-num { width: 46px; text-align: right; }
-  .gl-table thead th.gl-col-act { width: 96px; text-align: right; }
+  .gl-table thead th.gl-col-act { width: 150px; text-align: right; }
   .gl-table tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
   .gl-table tbody tr:last-child td { border-bottom: 0; }
   .gl-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, .02); }
   .gl-table tbody tr:hover { background: rgba(255, 52, 149, .06); }
   .gl-table td.gl-num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
   .gl-table td.gl-term { font-weight: 600; white-space: nowrap; }
-  .gl-table td.gl-act { text-align: right; }
+  .gl-table td.gl-act { text-align: right; white-space: nowrap; }
+  .gl-table td.gl-act .btn { padding: 3px 10px; font-size: 12px; }
+  .gl-table td.gl-act .btn + .btn { margin-left: 6px; }
+  .gl-table td.gl-act .gl-edit { color: var(--accent); border-color: var(--line-2); }
   .gl-table .gl-aliases { display: flex; gap: 6px; flex-wrap: wrap; }
   .gl-empty { color: var(--muted); text-align: center; padding: 22px 0; }
   .gl-add-form { display: flex; gap: 8px; margin: 12px 0 2px; flex-wrap: wrap; }
@@ -651,6 +654,8 @@
   .modal.wide #modal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .modal.wide #modal-body > :not(.gl-table-wrap) { flex: none; }
   .modal.wide .gl-table-wrap { flex: 0 1 auto; min-height: 110px; max-height: none; }
+  /* the flex column would stretch it: keep «Закрыть» a compact right-aligned pill */
+  .modal.wide .box > .close { align-self: flex-end; flex: none; }
   .modal h1 { font-size: 20px; margin: 0 0 14px; }
   .modal h2 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
   .modal p, .modal li { color: #cccccc; font-size: 14px; }
@@ -4726,7 +4731,10 @@ function renderGlossaryPanel() {
           ? t.aliases.map(a => `<span class="gl-alias">${escapeHtml(a)}</span>`).join('')
           : '<span class="vp-meta">без вариантов</span>'
       }</div></td>
-      <td class="gl-act"><button class="gl-del btn" data-tip="Удалить термин из словаря">Удалить</button></td>
+      <td class="gl-act">
+        <button class="gl-edit btn" data-tip="Изменить термин и его варианты">Изменить</button>
+        <button class="gl-del btn" data-tip="Удалить термин из словаря">Удалить</button>
+      </td>
     </tr>`).join('');
   return `
     <h1>Словарь терминов</h1>
@@ -4793,6 +4801,22 @@ function wireGlossaryPanel() {
     search.setSelectionRange(search.value.length, search.value.length);
   }
 
+  document.querySelectorAll('.gl-row .gl-edit').forEach((button) => {
+    button.onclick = () => {
+      const row = button.closest('.gl-row');
+      const rows = glossaryRows().terms;
+      const entry = rows.find(t => t.term === row.dataset.term);
+      if (!entry) return;
+      showGlossaryTermForm({
+        term: entry.term,
+        aliases: entry.aliases || [],
+        originalTerm: entry.term,
+        title: 'Изменить термин',
+        submitText: 'Сохранить изменения',
+      });
+    };
+  });
+
   document.querySelectorAll('.gl-row .gl-del').forEach((button) => {
     button.onclick = async () => {
       const row = button.closest('.gl-row');
@@ -4826,25 +4850,40 @@ function wireGlossaryPanel() {
 }
 
 function showGlossaryAddForm() {
+  showGlossaryTermForm({ term: '', aliases: [], title: 'Новый термин', submitText: 'Сохранить' });
+}
+
+/* Shared add/edit form for one glossary term. ``originalTerm`` is set when an
+   existing row is being renamed: the old entry is removed first so the term
+   can be changed, not just its aliases. */
+function showGlossaryTermForm(opts) {
+  const original = (opts.originalTerm || '').trim();
   showModal(`
-    <h1>Новый термин</h1>
+    <h1>${escapeHtml(opts.title || 'Термин')}</h1>
     <p class="sub" style="text-align:left">Как термин должен выглядеть в тексте и как его
        обычно слышно. Варианты — через запятую.</p>
     <label class="field"><span>Термин</span>
-      <input type="text" id="gl-term" placeholder="например: Kubernetes"></label>
+      <input type="text" id="gl-term" placeholder="например: Kubernetes" value="${escapeHtml(opts.term || '')}"></label>
     <label class="field" style="margin-top:10px"><span>Варианты (как слышится)</span>
-      <input type="text" id="gl-aliases" placeholder="например: кубернетес, кубер"></label>
+      <input type="text" id="gl-aliases" placeholder="например: кубернетес, кубер" value="${escapeHtml((opts.aliases || []).join(', '))}"></label>
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px">
       <button class="btn" id="gl-cancel">Отмена</button>
-      <button class="btn accent" id="gl-save">Сохранить</button>
+      <button class="btn accent" id="gl-save">${escapeHtml(opts.submitText || 'Сохранить')}</button>
     </div>`);
-  $('gl-term').focus();
+  const termInput = $('gl-term');
+  termInput.focus();
+  termInput.setSelectionRange(termInput.value.length, termInput.value.length);
   $('gl-cancel').onclick = () => { showModal(renderGlossaryPanel(), true); wireGlossaryPanel(); };
   $('gl-save').onclick = async () => {
     const term = $('gl-term').value.trim();
     const aliases = $('gl-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
     if (!term) { toast('Укажите термин'); return; }
     if (!aliases.length) { toast('Нужен хотя бы один вариант'); return; }
+    // renaming: drop the old canonical name first, otherwise the old row stays
+    if (original && original !== term) {
+      const del = await fetch('/api/glossary/term?term=' + encodeURIComponent(original), { method: 'DELETE' });
+      if (!del.ok) { toast('Не удалось изменить термин'); return; }
+    }
     const res = await fetch('/api/glossary/term', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4852,7 +4891,7 @@ function showGlossaryAddForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { toast('Не удалось сохранить: ' + (data.detail || res.status)); return; }
-    toast('Термин сохранён');
+    toast(original && original !== term ? 'Термин изменён' : 'Термин сохранён');
     await loadGlossary();
     showModal(renderGlossaryPanel(), true); wireGlossaryPanel();
   };
