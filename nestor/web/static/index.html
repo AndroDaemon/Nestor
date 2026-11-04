@@ -102,10 +102,13 @@
     display: flex; flex-direction: column; min-height: 0;
   }
   .rail-head {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; flex-direction: column; gap: 8px;
     padding: 14px 12px 10px; font-size: 11px; letter-spacing: .14em;
     text-transform: uppercase; color: var(--muted);
   }
+  /* four 28px buttons + gaps need 124px; the rail is 130px, so they wrap to a
+     second line instead of the last one sliding under <main> (unclickable) */
+  .rail-tools { display: flex; gap: 4px; }
   .icon-btn {
     width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel); color: var(--text); display: grid; place-items: center; font-size: 15px;
@@ -679,10 +682,12 @@
   <aside class="rail">
     <div class="rail-head">
       <span>Записи</span>
-      <button class="icon-btn" id="btn-rail-filter" data-tip="Показать только записи в работе и с ошибкой">⚑</button>
-      <button class="icon-btn" id="btn-home" data-tip="На главную (настройки, голоса)">⌂</button>
-      <button class="icon-btn" id="btn-table" data-tip="Таблица записей">▤</button>
-      <button class="icon-btn" id="btn-new" data-tip="Добавить файлы…">+</button>
+      <div class="rail-tools">
+        <button class="icon-btn" id="btn-rail-filter" data-tip="Показать только записи в работе и с ошибкой">⚑</button>
+        <button class="icon-btn" id="btn-home" data-tip="На главную (настройки, голоса)">⌂</button>
+        <button class="icon-btn" id="btn-table" data-tip="Таблица записей">▤</button>
+        <button class="icon-btn" id="btn-new" data-tip="Добавить файлы…">+</button>
+      </div>
     </div>
     <div class="rail-search-wrap">
       <input class="rail-search" id="rail-search" placeholder="Фильтр по имени…" data-tip="Показать только записи, в имени которых есть эти буквы">
