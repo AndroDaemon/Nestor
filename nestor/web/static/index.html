@@ -98,7 +98,7 @@
   /* --------------------------------------------------------------------- rail */
   .layout { flex: 1; display: flex; min-height: 0; }
   .rail {
-    width: 130px; flex: none; background: var(--bg-2); border-right: 1px solid var(--line);
+    width: 260px; flex: none; background: var(--bg-2); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; min-height: 0;
   }
   .rail-head {
@@ -133,6 +133,13 @@
     font-size: 13px; font-weight: 600; display: grid; place-items: center;
   }
   .help-btn:hover { border-color: var(--accent); color: var(--accent); }
+  /* «Голоса» и «Словарь» переехали из настроек в подвал панели записей */
+  .rail-jump {
+    width: 100%; padding: 5px 10px; border-radius: 8px;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--text);
+    font-size: 12px; cursor: pointer;
+  }
+  .rail-jump:hover { border-color: var(--accent); color: var(--accent); }
   .job {
     width: 100%; text-align: left; background: transparent; border: 1px solid transparent;
     border-radius: 10px; padding: 9px 10px; color: var(--text); margin-bottom: 4px;
@@ -141,7 +148,12 @@
   .job:hover { background: var(--panel); }
   .job.active { background: var(--panel-2); border-color: var(--line-2); }
   .job:focus-visible { border-color: var(--accent); }
-  .job .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 16px; }
+  .job .name {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; overflow: hidden; padding-right: 16px;
+  }
+  .job .name .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job .name .dot { margin-right: 0; flex: none; }
   .job .meta {
     color: var(--muted); font-size: 11px; margin-top: 3px; display: flex; gap: 6px;
     overflow: hidden; white-space: nowrap;
@@ -149,7 +161,7 @@
   .job .meta .m { overflow: hidden; text-overflow: ellipsis; }
   /* done-записи показывают под именем только цветной индикатор: подробности
      (длительность, спикеры, реплики, дата) — в подсказке при наведении */
-  .job.no-meta .meta { margin-top: 4px; }
+  .job.no-meta .meta { display: none; }
   .job-more {
     position: absolute; top: 5px; right: 3px; width: 20px; height: 20px;
     border: 0; border-radius: 6px; background: transparent; color: var(--muted);
@@ -325,10 +337,45 @@
   /* список терминов глоссария в модалке */
   .gl-aliases { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .gl-alias {
-    font-size: 12px; color: var(--muted); border: 1px solid var(--line);
-    border-radius: 999px; padding: 1px 9px; background: var(--bg);
+    font-size: 12.5px; color: var(--text); font-weight: 500;
+    border: 1px solid var(--line-2); background: var(--panel-2);
+    border-radius: 999px; padding: 2px 10px;
   }
-  .gl-search { width: 100%; margin: 10px 0 2px; }
+  /* словарь терминов: таблица «как база данных» + поиск по слову */
+  .gl-toolbar { display: flex; gap: 10px; align-items: center; margin: 12px 0 8px; flex-wrap: wrap; }
+  .gl-search-wrap { position: relative; flex: 1 1 220px; min-width: 180px; display: flex; align-items: center; }
+  .gl-search {
+    width: 100%; padding-right: 74px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 7px 74px 7px 10px; font: inherit; font-size: 13px;
+  }
+  .gl-search:focus { border-color: var(--accent); outline: none; }
+  .gl-search-count {
+    position: absolute; right: 8px; font-size: 11.5px; color: var(--muted);
+    background: var(--panel); padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line);
+    pointer-events: none; white-space: nowrap;
+  }
+  .gl-table-wrap {
+    max-height: 42vh; overflow: auto;
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  .gl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .gl-table thead th {
+    position: sticky; top: 0; z-index: 1; text-align: left;
+    background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px;
+    padding: 7px 12px; border-bottom: 1px solid var(--line-2);
+  }
+  .gl-table thead th.gl-col-num { width: 46px; text-align: right; }
+  .gl-table thead th.gl-col-act { width: 96px; text-align: right; }
+  .gl-table tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .gl-table tbody tr:last-child td { border-bottom: 0; }
+  .gl-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, .02); }
+  .gl-table tbody tr:hover { background: rgba(255, 52, 149, .06); }
+  .gl-table td.gl-num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .gl-table td.gl-term { font-weight: 600; white-space: nowrap; }
+  .gl-table td.gl-act { text-align: right; }
+  .gl-table .gl-aliases { display: flex; gap: 6px; flex-wrap: wrap; }
+  .gl-empty { color: var(--muted); text-align: center; padding: 22px 0; }
   .gl-add-form { display: flex; gap: 8px; margin: 12px 0 2px; flex-wrap: wrap; }
   .gl-add-form input { flex: 1 1 160px; }
   .gl-preview-out {
@@ -595,6 +642,8 @@
     background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius);
     max-width: 680px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 26px 28px;
   }
+  /* широкие табличные окна (словарь терминов): меньше переносов в строках */
+  .modal.wide .box { max-width: 1200px; }
   .modal h1 { font-size: 20px; margin: 0 0 14px; }
   .modal h2 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
   .modal p, .modal li { color: #cccccc; font-size: 14px; }
@@ -694,6 +743,8 @@
     </div>
     <div class="rail-list" id="rail"></div>
     <div class="rail-foot">
+      <button type="button" class="rail-jump" id="btn-voices" data-tip="Сохранённые голоса, имена и точность узнавания">Голоса</button>
+      <button type="button" class="rail-jump" id="btn-glossary" data-tip="Список терминов: что Nestor заменяет и на что">Словарь</button>
       <button class="help-btn" id="btn-help" data-tip="Как работает Nestor, приватность и лицензии">?</button>
       <div id="app-version" title="Версия Nestor">Nestor</div>
     </div>
@@ -747,7 +798,6 @@
           <label class="field wide" style="display:flex;align-items:center;gap:8px">
             <input type="checkbox" id="vp-match" checked style="width:auto">
             <span>Подставлять знакомые имена (сохранено голосов: <span id="vp-count">0</span>)</span>
-            <button type="button" class="voices-link" id="btn-voices" data-tip="Сохранённые голоса, имена и точность узнавания">Голоса</button>
           </label>
           <details class="more">
             <summary>Дополнительно</summary>
@@ -765,7 +815,6 @@
             <label class="field wide check-row">
               <input type="checkbox" id="glossary" style="width:auto">
               <span>Исправлять термины по словарю (терминов: <span id="glossary-count">0</span>)</span>
-              <button type="button" class="voices-link" id="btn-glossary" data-tip="Список терминов: что Nestor заменяет и на что">Словарь</button>
               <span class="hint">Nestor часто слышит «докер», «днс», «айпи» так, как их произносят. Со словарём он заменяет такие слова на канонические — Docker, DNS, IP-адрес. Работает офлайн, на скорость не влияет и ничего не додумывает: только замены из словаря.</span>
             </label>
             <div class="group-label">Скорость и нагрузка</div>
@@ -958,6 +1007,7 @@ const state = {
   voiceprints: [],     // saved voices: {slug, name, ...}
   glossary: null,      // {source, path, count, terms:[{term,aliases}]}
   glossaryQuery: '',   // glossary panel search filter (lower-case)
+  glossarySort: 'asc', // glossary table sort by term: asc | desc
   match: {},           // speaker id -> {assigned_name, confidence, ...}
   savedVoices: {},     // speaker id -> true (saved during this session)
   view: null,          // zoom window [startSec, endSec] or null = whole take
@@ -1390,12 +1440,12 @@ async function loadRail() {
     const meta = railMeta(rec);
     const hint = railHint(rec);
 
-    card.innerHTML = `<div class="name"></div>
-      <div class="meta"><span><span class="dot ${dot}"></span></span><span class="m"></span></div>
+    card.innerHTML = `<div class="name"><span class="dot ${dot}"></span><span class="nm"></span></div>
+      <div class="meta"><span class="m"></span></div>
       <button class="job-expand" data-tip="Подробнее: имя файла, где лежит оригинал, длительность и скорость обработки" aria-label="Подробнее о записи">▸</button>
       <button class="job-more" data-tip="Действия: выгрузить, переобработать, удалить" aria-label="Действия с записью">⋯</button>
       <div class="job-details"></div>`;
-    card.querySelector('.name').textContent = rec.filename;
+    card.querySelector('.name .nm').textContent = rec.filename;
     card.querySelector('.m').textContent = meta;
     card.classList.toggle('no-meta', !meta);
     card.dataset.tip = hint.join('\n');
@@ -1801,6 +1851,7 @@ function refreshActivity() {
     bar.classList.add('hidden');
     fill.classList.remove('indeterminate');
     fill.style.width = '0%';
+    refreshRailActivity();
     return;
   }
   const current = working[0];
@@ -1822,6 +1873,27 @@ function refreshActivity() {
     // nothing measured yet (models loading, decoding) — keep the bar running
     fill.classList.add('indeterminate');
     fill.style.width = '';
+  }
+  refreshRailActivity();
+}
+
+/* Keep the rail in step with the poll: in-flight cards change their dot colour
+   and meta line (percent, stage, elapsed) without a structural rebuild. */
+function refreshRailActivity() {
+  const rail = $('rail');
+  if (!rail) return;
+  for (const rec of state.recordings || []) {
+    const card = rail.querySelector(`.job[data-id="${rec.id}"]`);
+    if (!card) continue;
+    const dot = card.querySelector('.name .dot');
+    if (dot) dot.className = 'dot ' + (rec.status === 'done' ? 'done'
+      : (rec.status === 'error' ? 'error'
+        : (rec.status === 'cancelled' ? 'cancelled' : 'working')));
+    const meta = railMeta(rec);
+    const m = card.querySelector('.meta .m');
+    if (m) m.textContent = meta;
+    card.classList.toggle('no-meta', !meta);
+    card.dataset.tip = railHint(rec).join('\n');
   }
 }
 
@@ -4177,13 +4249,15 @@ $('btn-copy-text').onclick = () => {
 $('modal-close').onclick = () => $('modal').classList.add('hidden');
 $('modal').onclick = (e) => { if (e.target === $('modal')) $('modal').classList.add('hidden'); };
 
-function showModal(html) {
+function showModal(html, wide = false) {
   $('modal-body').innerHTML = html;
+  $('modal').classList.toggle('wide', !!wide);
   $('modal').classList.remove('hidden');
 }
 
 function closeModal() {
   $('modal').classList.add('hidden');
+  $('modal').classList.remove('wide');
 }
 
 /* In-app replacement for the native confirm() (whose title showed
@@ -4629,20 +4703,24 @@ function renderGlossaryPanel() {
   const { terms, filtered } = glossaryRows();
   const srcLabel = state.glossary && state.glossary.source === 'user'
     ? 'свой файл' : 'встроенный словарь';
-  const rows = filtered.map(t => `
-    <div class="vp-row gl-row" data-term="${escapeHtml(t.term)}">
-      <div class="vp-main">
-        <div class="vp-line">
-          <span class="vp-name">${escapeHtml(t.term)}</span>
-          <button class="gl-del btn" data-tip="Удалить термин из словаря">Удалить</button>
-        </div>
-        <div class="gl-aliases">${
-          (t.aliases && t.aliases.length)
-            ? t.aliases.map(a => `<span class="gl-alias">${escapeHtml(a)}</span>`).join('')
-            : '<span class="vp-meta">без вариантов</span>'
-        }</div>
-      </div>
-    </div>`).join('');
+  const sortDir = state.glossarySort === 'desc' ? 'desc' : 'asc';
+  const ordered = filtered.slice().sort((a, b) => {
+    const r = a.term.localeCompare(b.term, 'ru', { sensitivity: 'base' });
+    return sortDir === 'asc' ? r : -r;
+  });
+  const rowCount = filtered.length;
+  const arrow = sortDir === 'asc' ? '▲' : '▼';
+  const rows = ordered.map((t, i) => `
+    <tr class="gl-row" data-term="${escapeHtml(t.term)}">
+      <td class="gl-num">${i + 1}</td>
+      <td class="gl-term">${escapeHtml(t.term)}</td>
+      <td><div class="gl-aliases">${
+        (t.aliases && t.aliases.length)
+          ? t.aliases.map(a => `<span class="gl-alias">${escapeHtml(a)}</span>`).join('')
+          : '<span class="vp-meta">без вариантов</span>'
+      }</div></td>
+      <td class="gl-act"><button class="gl-del btn" data-tip="Удалить термин из словаря">Удалить</button></td>
+    </tr>`).join('');
   return `
     <h1>Словарь терминов</h1>
     <p class="sub" style="text-align:left">Nestor слышит «докер», «днс», «айпи» так, как это
@@ -4654,10 +4732,25 @@ function renderGlossaryPanel() {
       <button class="btn" id="gl-import" data-tip="Добавить термины из YAML/JSON-файла">Импорт из файла…</button>
       <button class="btn" id="gl-add" data-tip="Добавить новый термин">Добавить термин…</button>
     </div>
-    <input type="text" id="gl-search" class="gl-search" placeholder="Поиск по термину или варианту…" value="${escapeHtml(state.glossaryQuery)}">
-    <div class="vp-list">${
-      rows || '<div class="vp-empty">Ничего не найдено.</div>'
-    }</div>
+    <div class="gl-toolbar">
+      <div class="gl-search-wrap">
+        <input type="text" id="gl-search" class="gl-search" placeholder="Поиск по слову: термин или вариант…" value="${escapeHtml(state.glossaryQuery)}" autocomplete="off">
+        <span class="gl-search-count" id="gl-count">${rowCount} из ${terms.length}</span>
+      </div>
+    </div>
+    <div class="gl-table-wrap">
+      <table class="gl-table">
+        <thead>
+          <tr>
+            <th class="gl-col-num">№</th>
+            <th id="gl-sort-term" style="cursor:pointer" data-tip="Сортировать по термину">Термин ${arrow}</th>
+            <th>Варианты (как слышится)</th>
+            <th class="gl-col-act">Действие</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="4" class="gl-empty">Ничего не найдено — измените запрос.</td></tr>'}</tbody>
+      </table>
+    </div>
     <h2 style="margin-top:18px">Проверить текст</h2>
     <p class="sub" style="text-align:left">Вставьте фразу — покажу, что и на что заменится.</p>
     <textarea id="gl-preview-input" rows="2" style="width:100%; margin:6px 0 0" placeholder="например: подними докер и проверь днс"></textarea>
@@ -4672,12 +4765,21 @@ function wireGlossaryPanel() {
   const addBtn = $('gl-add');
   if (addBtn) addBtn.onclick = () => showGlossaryAddForm();
 
+  const sortHead = $('gl-sort-term');
+  if (sortHead) {
+    sortHead.onclick = () => {
+      state.glossarySort = state.glossarySort === 'desc' ? 'asc' : 'desc';
+      showModal(renderGlossaryPanel(), true);
+      wireGlossaryPanel();
+    };
+  }
+
   const search = $('gl-search');
   if (search) {
     search.oninput = () => {
       state.glossaryQuery = search.value;
       const out = renderGlossaryPanel();
-      showModal(out);
+      showModal(out, true);
       wireGlossaryPanel();
     };
     search.focus();
@@ -4690,7 +4792,7 @@ function wireGlossaryPanel() {
       const term = row.dataset.term;
       if (!(await showConfirm(`Удалить термин «${term}» из словаря?`, { confirmText: 'Удалить' }))) return;
       const res = await fetch('/api/glossary/term?term=' + encodeURIComponent(term), { method: 'DELETE' });
-      if (res.ok) { toast('Термин удалён'); await loadGlossary(); showModal(renderGlossaryPanel()); wireGlossaryPanel(); }
+      if (res.ok) { toast('Термин удалён'); await loadGlossary(); showModal(renderGlossaryPanel(), true); wireGlossaryPanel(); }
       else toast('Не удалось удалить термин');
     };
   });
@@ -4730,7 +4832,7 @@ function showGlossaryAddForm() {
       <button class="btn accent" id="gl-save">Сохранить</button>
     </div>`);
   $('gl-term').focus();
-  $('gl-cancel').onclick = () => { showModal(renderGlossaryPanel()); wireGlossaryPanel(); };
+  $('gl-cancel').onclick = () => { showModal(renderGlossaryPanel(), true); wireGlossaryPanel(); };
   $('gl-save').onclick = async () => {
     const term = $('gl-term').value.trim();
     const aliases = $('gl-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
@@ -4745,7 +4847,7 @@ function showGlossaryAddForm() {
     if (!res.ok) { toast('Не удалось сохранить: ' + (data.detail || res.status)); return; }
     toast('Термин сохранён');
     await loadGlossary();
-    showModal(renderGlossaryPanel()); wireGlossaryPanel();
+    showModal(renderGlossaryPanel(), true); wireGlossaryPanel();
   };
 }
 
@@ -4771,7 +4873,7 @@ async function importGlossary() {
     if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
     toast(`Импорт: +${data.added} новых, заменено ${data.replaced}`);
     await loadGlossary();
-    showModal(renderGlossaryPanel()); wireGlossaryPanel();
+    showModal(renderGlossaryPanel(), true); wireGlossaryPanel();
   };
   if (window.pywebview && window.pywebview.api && window.pywebview.api.open_glossary_file) {
     try {
@@ -4802,7 +4904,7 @@ async function importGlossary() {
 
 $('btn-glossary').onclick = async () => {
   await loadGlossary();
-  showModal(renderGlossaryPanel());
+  showModal(renderGlossaryPanel(), true);
   wireGlossaryPanel();
 };
 
