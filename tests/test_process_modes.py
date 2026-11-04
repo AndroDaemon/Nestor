@@ -343,6 +343,10 @@ def test_voiceprint_stale_cache_is_rebuilt(tmp_path, monkeypatch):
     audio, embedding only the requested speaker's own segments (a full
     re-embed of a long recording is minutes; per-speaker stays quick), and
     no partial cache is written back."""
+    from nestor.models import has_local_diarization
+
+    if not has_local_diarization():
+        pytest.skip("diarization/embedding models are not downloaded")
     library = Library(tmp_path)
     recording = Recording(id="rec1", filename="a.wav", status="done")
     recording.segments = [
