@@ -3,6 +3,6 @@
 Stack: GigaAM v3 (ASR) + sherpa-onnx (diarization), both running locally.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 __all__ = ["__version__"]

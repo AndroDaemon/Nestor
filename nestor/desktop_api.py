@@ -293,6 +293,51 @@ class DesktopApi:
             return None
         return str(result if isinstance(result, str) else result[0])
 
+    def save_glossary_as(self) -> Optional[str]:
+        """Native Save As for the effective glossary (YAML); path or None."""
+        from .glossary import dump_glossary, load_glossary, resolve_glossary_path
+
+        if not self._window:
+            return None
+        glossary = load_glossary(resolve_glossary_path(self.library.root))
+        stamp = datetime.now().strftime("%Y-%m-%d")
+        default_name = f"nestor-hotwords-{stamp}.yaml"
+        try:
+            dialog_type = dialog_constant("SAVE")
+            result = self._window.create_file_dialog(
+                dialog_type,
+                directory=str(downloads_folder()),
+                save_filename=default_name,
+                file_types=("Словарь терминов Nestor (*.yaml)", "Все файлы (*.*)"),
+            )
+        except Exception:  # noqa: BLE001 - a cancelled/broken dialog is not fatal
+            return None
+        if not result:
+            return None
+        target = Path(result if isinstance(result, str) else result[0])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(dump_glossary(glossary), encoding="utf-8")
+        return str(target)
+
+    def open_glossary_file(self) -> Optional[str]:
+        """Native Open dialog for a glossary YAML/JSON file; path or None."""
+        if not self._window:
+            return None
+        try:
+            dialog_type = dialog_constant("OPEN")
+            result = self._window.create_file_dialog(
+                dialog_type,
+                file_types=(
+                    "Словарь терминов (*.yaml;*.yml;*.json)",
+                    "Все файлы (*.*)",
+                ),
+            )
+        except Exception:  # noqa: BLE001 - a cancelled/broken dialog is not fatal
+            return None
+        if not result:
+            return None
+        return str(result if isinstance(result, str) else result[0])
+
     # ------------------------------------------------------------------ misc
     def open_data_folder(self) -> str:
         """Open the folder with recordings in Explorer."""

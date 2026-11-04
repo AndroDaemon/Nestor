@@ -22,6 +22,7 @@ A user copy lives at ``<data root>/hotwords.yaml``; when absent the bundled
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,7 +62,18 @@ class Glossary:
         """Read a YAML glossary; malformed entries are skipped silently."""
         import yaml  # imported lazily so the rest of Nestor never needs it
 
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or []
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        return cls._from_data(data)
+
+    @classmethod
+    def parse(cls, text: str) -> "Glossary":
+        """Parse a glossary from YAML (or JSON - JSON is valid YAML)."""
+        import yaml
+
+        return cls._from_data(yaml.safe_load(text))
+
+    @classmethod
+    def _from_data(cls, data: object) -> "Glossary":
         terms: List[Term] = []
         if not isinstance(data, list):
             return cls(terms)
@@ -264,6 +276,112 @@ def apply_to_segments(segments: Sequence, glossary: Glossary) -> int:
     return total
 
 
+# --------------------------------------------------------------------------- #
+# Editing — the user glossary file
+# --------------------------------------------------------------------------- #
+def user_glossary_path(root: "str | Path") -> Path:
+    """Where a user's own glossary lives (``<data root>/hotwords.yaml``)."""
+    return Path(root) / "hotwords.yaml"
+
+
+def glossary_source(root: "str | Path | None" = None) -> str:
+    """``"user"`` when the data-root file exists, else ``"bundled"``."""
+    if root is not None and user_glossary_path(root).exists():
+        return "user"
+    return "bundled"
+
+
+def editable_glossary_path(root: "str | Path") -> Path:
+    """The file edits should go to: the user file, seeded from the bundled one.
+
+    The bundled glossary lives inside the installed package and would be
+    overwritten by an update, so the first edit copies it to the data root and
+    every later edit works on that copy. Returns the path (not yet written).
+    """
+    target = user_glossary_path(root)
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        bundled = default_glossary_path()
+        if bundled.exists():
+            target.write_text(bundled.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+def dump_glossary(glossary: Glossary) -> str:
+    """Render a glossary back to YAML text (no PyYAML dependency needed)."""
+    lines: List[str] = []
+    for term in glossary.terms:
+        canonical = term.term.strip()
+        if not canonical:
+            continue
+        lines.append(f'- term: {_yaml_dq(canonical)}')
+        aliases = [a.strip() for a in term.aliases if a.strip()]
+        if aliases:
+            rendered = ", ".join(_yaml_dq(a) for a in aliases)
+            lines.append(f'  aliases: [{rendered}]')
+        else:
+            lines.append("  aliases: []")
+    return "\n".join(lines) + "\n"
+
+
+def _yaml_dq(text: str) -> str:
+    """A double-quoted YAML scalar (escaping just what YAML needs)."""
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def save_glossary(glossary: Glossary, path: "str | Path") -> Path:
+    """Write a glossary to ``path`` atomically. Returns the path."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(dump_glossary(glossary), encoding="utf-8")
+    for attempt in range(10):
+        try:
+            os.replace(tmp, target)
+            break
+        except PermissionError:
+            import time as _time
+
+            _time.sleep(0.01 + 0.01 * attempt)
+    else:  # last resort: never lose the data
+        target.write_text(dump_glossary(glossary), encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+    # the loader caches by mtime; a fresh write must not serve stale terms
+    _CACHE.clear()
+    return target
+
+
+def upsert_term(glossary: Glossary, term: str, aliases: Sequence[str]) -> Glossary:
+    """Add a term, or replace the aliases of an existing one (by name)."""
+    name = term.strip()
+    cleaned = [a.strip() for a in aliases if a.strip()]
+    existing = next((t for t in glossary.terms if t.term == name), None)
+    if existing is not None:
+        existing.aliases = cleaned
+        return glossary
+    glossary.terms.append(Term(term=name, aliases=cleaned))
+    return glossary
+
+
+def remove_term(glossary: Glossary, term: str) -> bool:
+    """Drop a term by name; True when something was removed."""
+    before = len(glossary.terms)
+    glossary.terms = [t for t in glossary.terms if t.term != term.strip()]
+    return len(glossary.terms) != before
+
+
+def merge_glossary(base: Glossary, extra: Glossary) -> int:
+    """Fold ``extra`` into ``base`` (extra wins on a name clash). Returns count."""
+    added = 0
+    for term in extra.terms:
+        exists = any(t.term == term.term for t in base.terms)
+        upsert_term(base, term.term, term.aliases)
+        if not exists:
+            added += 1
+    return added
+
+
 __all__ = [
     "Glossary",
     "Term",
@@ -272,7 +390,15 @@ __all__ = [
     "apply_to_segments",
     "build_alias_map",
     "default_glossary_path",
+    "dump_glossary",
+    "editable_glossary_path",
+    "glossary_source",
     "load_glossary",
+    "merge_glossary",
     "postcorrect",
+    "remove_term",
     "resolve_glossary_path",
+    "save_glossary",
+    "upsert_term",
+    "user_glossary_path",
 ]

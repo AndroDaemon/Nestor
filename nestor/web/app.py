@@ -45,6 +45,20 @@ from ..audio import decode, duration, write_wav
 from ..constants import SAMPLE_RATE
 from ..config import DEFAULT_ASR_MODEL, Config
 from ..exporters import transcript_from_recording
+from ..glossary import (
+    Glossary,
+    build_alias_map,
+    dump_glossary,
+    editable_glossary_path,
+    glossary_source,
+    load_glossary,
+    merge_glossary,
+    remove_term,
+    resolve_glossary_path,
+    save_glossary,
+    upsert_term,
+    user_glossary_path,
+)
 from ..library import Library, Recording, Segment
 from ..pipeline import JobCancelled, process_file
 from ..settings import SettingsStore
@@ -1696,6 +1710,141 @@ def create_app(
             media_type=media_type,
             filename=Path(path).name,
         )
+
+    # ---------------------------------------------------------------- glossary
+    @app.get("/api/glossary")
+    def get_glossary() -> Dict[str, object]:
+        """Terms currently in effect, plus where the list comes from."""
+        path = resolve_glossary_path(lib.root)
+        glossary = load_glossary(path)
+        return {
+            "source": glossary_source(lib.root),
+            "path": str(path),
+            "count": len(glossary),
+            "terms": [
+                {"term": t.term, "aliases": list(t.aliases)}
+                for t in glossary.terms
+            ],
+        }
+
+    @app.post("/api/glossary/term")
+    async def add_glossary_term(request: Request) -> Dict[str, object]:
+        """Add or replace one term in the user's editable glossary."""
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+
+        term = str(body.get("term") or "").strip()
+        raw_aliases = body.get("aliases") or []
+        if isinstance(raw_aliases, str):
+            raw_aliases = re.split(r"[,\n;]+", raw_aliases)
+        aliases = [str(a).strip() for a in raw_aliases if str(a).strip()]
+        if not term:
+            raise HTTPException(status_code=400, detail="Укажите термин")
+        if not aliases:
+            raise HTTPException(status_code=400, detail="Нужен хотя бы один вариант")
+
+        target = editable_glossary_path(lib.root)
+        glossary = load_glossary(target)
+        upsert_term(glossary, term, aliases)
+        save_glossary(glossary, target)
+        lib.log(f"glossary: term saved «{term}» ({len(aliases)} alias(es))")
+        return {"term": term, "aliases": aliases, "count": len(glossary)}
+
+    @app.delete("/api/glossary/term")
+    async def delete_glossary_term(term: str) -> Dict[str, object]:
+        """Remove a term (by canonical name) from the editable glossary."""
+        name = (term or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Укажите термин")
+        target = editable_glossary_path(lib.root)
+        glossary = load_glossary(target)
+        removed = remove_term(glossary, name)
+        if not removed:
+            raise HTTPException(status_code=404, detail="Термин не найден")
+        save_glossary(glossary, target)
+        lib.log(f"glossary: term removed «{name}»")
+        return {"removed": name, "count": len(glossary)}
+
+    @app.get("/api/glossary/export")
+    def export_glossary() -> Response:
+        """The effective glossary as a portable YAML file."""
+        path = resolve_glossary_path(lib.root)
+        glossary = load_glossary(path)
+        stamp = datetime.now().strftime("%Y-%m-%d")
+        filename = f"nestor-hotwords-{stamp}.yaml"
+        lib.log(f"glossary exported: {len(glossary)} terms")
+        return Response(
+            content=dump_glossary(glossary),
+            media_type="application/x-yaml",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/api/glossary/import")
+    async def import_glossary(request: Request) -> Dict[str, object]:
+        """Merge terms from a YAML/JSON file into the editable glossary.
+
+        Two bodies, mirroring voiceprints: ``{"path": ...}`` (the native Open
+        dialog hands us a path) or ``multipart/form-data`` with a ``file``
+        field (the browser fallback)."""
+        ctype = (request.headers.get("content-type") or "").lower()
+        text: str = ""
+        if "application/json" in ctype:
+            try:
+                body = await request.json()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+            raw_path = str((body or {}).get("path") or "").strip()
+            if not raw_path:
+                raise HTTPException(status_code=400, detail="Нужен path или файл")
+            source = Path(raw_path)
+            if not source.exists():
+                raise HTTPException(status_code=404, detail="Файл не найден")
+            text = source.read_text(encoding="utf-8")
+        else:
+            form = await request.form()
+            upload = form.get("file")
+            if upload is None or isinstance(upload, str):
+                raise HTTPException(status_code=400, detail="Нужен файл словаря")
+            raw = await upload.read()
+            if len(raw) > 5 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Файл слишком большой")
+            text = raw.decode("utf-8")
+
+        try:
+            incoming = Glossary.parse(text)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный словарь: {exc}")
+        if not incoming:
+            raise HTTPException(status_code=400, detail="В файле нет терминов")
+
+        target = editable_glossary_path(lib.root)
+        glossary = load_glossary(target)
+        added = merge_glossary(glossary, incoming)
+        save_glossary(glossary, target)
+        lib.log(
+            f"glossary imported: +{added} new, {len(incoming) - added} replaced, "
+            f"{len(glossary)} total"
+        )
+        return {
+            "added": added,
+            "replaced": len(incoming) - added,
+            "count": len(glossary),
+        }
+
+    @app.get("/api/glossary/preview")
+    def preview_glossary(text: str = "") -> Dict[str, object]:
+        """Dry-run: what the current glossary would change in ``text``."""
+        alias_map = build_alias_map(load_glossary(resolve_glossary_path(lib.root)))
+        from ..glossary import postcorrect
+
+        corrected, changes = postcorrect(text, alias_map)
+        return {
+            "text": corrected,
+            "changes": [{"from": a, "to": b} for a, b in changes],
+        }
 
     # ------------------------------------------------------------- voiceprints
     @app.get("/api/voiceprints")

@@ -20,9 +20,17 @@ from nestor.glossary import (  # noqa: E402
     apply_to_segments,
     build_alias_map,
     default_glossary_path,
+    dump_glossary,
+    editable_glossary_path,
+    glossary_source,
     load_glossary,
+    merge_glossary,
     postcorrect,
+    remove_term,
     resolve_glossary_path,
+    save_glossary,
+    upsert_term,
+    user_glossary_path,
 )
 from nestor.types import Segment, Word  # noqa: E402
 
@@ -154,3 +162,93 @@ def test_realistic_sentence(tmp_path):
     )
     assert "Docker" in text and "Kubernetes" in text and "DNS" in text
     assert len(changes) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Editing: parse / dump / save / upsert / remove / merge
+# --------------------------------------------------------------------------- #
+def test_parse_and_dump_roundtrip():
+    glossary = Glossary.parse('- term: "API"\n  aliases: [апи, api]\n')
+    assert len(glossary) == 1
+    assert glossary.terms[0].term == "API"
+    assert glossary.terms[0].aliases == ["апи", "api"]
+    dumped = dump_glossary(glossary)
+    assert '- term: "API"' in dumped
+    assert 'aliases: ["апи", "api"]' in dumped
+    # the dump is valid YAML again
+    assert dump_glossary(Glossary.parse(dumped)) == dumped
+
+
+def test_parse_skips_malformed_entries():
+    glossary = Glossary.parse(
+        "- term: \"Ok\"\n  aliases: [a]\n- no term here\n- term: \"\"\n"
+    )
+    assert [t.term for t in glossary.terms] == ["Ok"]
+
+
+def test_upsert_adds_then_replaces(tmp_path):
+    path = _glossary(tmp_path, '- term: "Docker"\n  aliases: ["докер"]\n')
+    glossary = load_glossary(path)
+    assert upsert_term(glossary, "DNS", ["днс", "dns"]) is glossary
+    assert len(glossary) == 2
+    # replacing by name keeps the count but swaps aliases
+    upsert_term(glossary, "Docker", ["докер", "докерс"])
+    assert len(glossary) == 2
+    docker = next(t for t in glossary.terms if t.term == "Docker")
+    assert docker.aliases == ["докер", "докерс"]
+
+
+def test_remove_term(tmp_path):
+    path = _glossary(tmp_path, '''
+        - term: "Docker"
+          aliases: ["докер"]
+        - term: "DNS"
+          aliases: ["днс"]
+    ''')
+    glossary = load_glossary(path)
+    assert remove_term(glossary, "Docker") is True
+    assert [t.term for t in glossary.terms] == ["DNS"]
+    assert remove_term(glossary, "нет-такого") is False
+
+
+def test_save_then_reload_reflects_change(tmp_path):
+    path = tmp_path / "hotwords.yaml"
+    glossary = Glossary([Term(term="Kubernetes", aliases=["кубернетес"])])
+    save_glossary(glossary, path)
+    reloaded = load_glossary(path)
+    assert [t.term for t in reloaded.terms] == ["Kubernetes"]
+    # the mtime cache was invalidated: a second write is visible too
+    upsert_term(reloaded, "Docker", ["докер"])
+    save_glossary(reloaded, path)
+    assert len(load_glossary(path)) == 2
+
+
+def test_merge_glossary_counts_new_terms():
+    base = Glossary([Term(term="Docker", aliases=["докер"])])
+    extra = Glossary([
+        Term(term="Docker", aliases=["докер", "докерс"]),  # replaces, not new
+        Term(term="DNS", aliases=["днс"]),  # new
+    ])
+    added = merge_glossary(base, extra)
+    assert added == 1
+    assert len(base) == 2
+    assert next(t for t in base.terms if t.term == "Docker").aliases == ["докер", "докерс"]
+
+
+def test_editable_path_seeds_from_bundled(tmp_path):
+    target = editable_glossary_path(tmp_path)
+    assert target == user_glossary_path(tmp_path)
+    assert target.exists()
+    # it was seeded with the bundled glossary's content
+    assert len(load_glossary(target)) >= 100
+    # a second call is a no-op, not a re-seed
+    upsert_term(load_glossary(target), "TestTerm", ["тесттерм"])
+    save_glossary(load_glossary(target), target)
+    assert "TestTerm" in editable_glossary_path(tmp_path).read_text(encoding="utf-8")
+
+
+def test_glossary_source_reports_origin(tmp_path):
+    assert glossary_source(tmp_path) == "bundled"
+    save_glossary(Glossary([Term(term="X", aliases=["y"])]), user_glossary_path(tmp_path))
+    assert glossary_source(tmp_path) == "user"
+

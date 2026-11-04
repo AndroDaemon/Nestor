@@ -319,6 +319,21 @@
   }
   .vp-actions { display: flex; gap: 8px; margin-top: 14px; }
   .vp-empty { color: var(--muted); padding: 14px 2px; }
+  /* список терминов глоссария в модалке */
+  .gl-aliases { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .gl-alias {
+    font-size: 12px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 9px; background: var(--bg);
+  }
+  .gl-search { width: 100%; margin: 10px 0 2px; }
+  .gl-add-form { display: flex; gap: 8px; margin: 12px 0 2px; flex-wrap: wrap; }
+  .gl-add-form input { flex: 1 1 160px; }
+  .gl-preview-out {
+    margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--panel); white-space: pre-wrap;
+    word-break: break-word; line-height: 1.5;
+  }
+  .gl-preview-out mark { background: rgba(255,52,149,.2); color: var(--accent); border-radius: 4px; padding: 0 2px; }
   /* попап переименования спикера у строки реплики */
   #rename-pop {
     position: fixed; z-index: 60; display: flex; gap: 6px; align-items: center;
@@ -744,7 +759,8 @@
             <div class="group-label">Термины</div>
             <label class="field wide check-row">
               <input type="checkbox" id="glossary" style="width:auto">
-              <span>Исправлять термины по словарю</span>
+              <span>Исправлять термины по словарю (терминов: <span id="glossary-count">0</span>)</span>
+              <button type="button" class="voices-link" id="btn-glossary" data-tip="Список терминов: что Nestor заменяет и на что">Словарь</button>
               <span class="hint">Nestor часто слышит «докер», «днс», «айпи» так, как их произносят. Со словарём он заменяет такие слова на канонические — Docker, DNS, IP-адрес. Работает офлайн, на скорость не влияет и ничего не додумывает: только замены из словаря.</span>
             </label>
             <div class="group-label">Скорость и нагрузка</div>
@@ -935,6 +951,8 @@ const state = {
   nextColor: 0,        // next free colour slot
   chipsExpanded: false, // speaker chips list expanded (many speakers)
   voiceprints: [],     // saved voices: {slug, name, ...}
+  glossary: null,      // {source, path, count, terms:[{term,aliases}]}
+  glossaryQuery: '',   // glossary panel search filter (lower-case)
   match: {},           // speaker id -> {assigned_name, confidence, ...}
   savedVoices: {},     // speaker id -> true (saved during this session)
   view: null,          // zoom window [startSec, endSec] or null = whole take
@@ -4580,6 +4598,209 @@ $('btn-voices').onclick = async () => {
   wireVoicesPanel();
 };
 
+/* ------------------------------------------------------------------ glossary */
+
+async function loadGlossary() {
+  try {
+    const data = await (await fetch('/api/glossary')).json();
+    state.glossary = data;
+    state.glossaryQuery = '';
+  } catch { state.glossary = null; }
+  const el = $('glossary-count');
+  if (el) el.textContent = (state.glossary && state.glossary.count) || 0;
+}
+
+function glossaryRows() {
+  const terms = (state.glossary && state.glossary.terms) || [];
+  const q = state.glossaryQuery.trim().toLowerCase();
+  const filtered = q
+    ? terms.filter(t => t.term.toLowerCase().includes(q)
+        || (t.aliases || []).some(a => a.toLowerCase().includes(q)))
+    : terms;
+  return { terms, filtered, q };
+}
+
+function renderGlossaryPanel() {
+  const { terms, filtered } = glossaryRows();
+  const srcLabel = state.glossary && state.glossary.source === 'user'
+    ? 'свой файл' : 'встроенный словарь';
+  const rows = filtered.map(t => `
+    <div class="vp-row gl-row" data-term="${escapeHtml(t.term)}">
+      <div class="vp-main">
+        <div class="vp-line">
+          <span class="vp-name">${escapeHtml(t.term)}</span>
+          <button class="gl-del btn" data-tip="Удалить термин из словаря">Удалить</button>
+        </div>
+        <div class="gl-aliases">${
+          (t.aliases && t.aliases.length)
+            ? t.aliases.map(a => `<span class="gl-alias">${escapeHtml(a)}</span>`).join('')
+            : '<span class="vp-meta">без вариантов</span>'
+        }</div>
+      </div>
+    </div>`).join('');
+  return `
+    <h1>Словарь терминов</h1>
+    <p class="sub" style="text-align:left">Nestor слышит «докер», «днс», «айпи» так, как это
+       произносят, и заменяет их на канонические — Docker, DNS, IP-адрес. Ниже — что за чем
+       следит. Источник: <b>${escapeHtml(srcLabel)}</b> (${terms.length} терминов).
+       Встроенный словарь не меняется — ваши правки хранятся отдельным файлом.</p>
+    <div class="vp-actions">
+      <button class="btn" id="gl-export" data-tip="Сохранить словарь файлом — чтобы перенести на другой компьютер или отредактировать вручную">Экспорт в файл…</button>
+      <button class="btn" id="gl-import" data-tip="Добавить термины из YAML/JSON-файла">Импорт из файла…</button>
+      <button class="btn" id="gl-add" data-tip="Добавить новый термин">Добавить термин…</button>
+    </div>
+    <input type="text" id="gl-search" class="gl-search" placeholder="Поиск по термину или варианту…" value="${escapeHtml(state.glossaryQuery)}">
+    <div class="vp-list">${
+      rows || '<div class="vp-empty">Ничего не найдено.</div>'
+    }</div>
+    <h2 style="margin-top:18px">Проверить текст</h2>
+    <p class="sub" style="text-align:left">Вставьте фразу — покажу, что и на что заменится.</p>
+    <textarea id="gl-preview-input" rows="2" style="width:100%; margin:6px 0 0" placeholder="например: подними докер и проверь днс"></textarea>
+    <div id="gl-preview-out" class="gl-preview-out" style="display:none"></div>`;
+}
+
+function wireGlossaryPanel() {
+  const exportBtn = $('gl-export');
+  if (exportBtn) exportBtn.onclick = () => exportGlossary();
+  const importBtn = $('gl-import');
+  if (importBtn) importBtn.onclick = () => importGlossary();
+  const addBtn = $('gl-add');
+  if (addBtn) addBtn.onclick = () => showGlossaryAddForm();
+
+  const search = $('gl-search');
+  if (search) {
+    search.oninput = () => {
+      state.glossaryQuery = search.value;
+      const out = renderGlossaryPanel();
+      showModal(out);
+      wireGlossaryPanel();
+    };
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+  }
+
+  document.querySelectorAll('.gl-row .gl-del').forEach((button) => {
+    button.onclick = async () => {
+      const row = button.closest('.gl-row');
+      const term = row.dataset.term;
+      if (!(await showConfirm(`Удалить термин «${term}» из словаря?`, { confirmText: 'Удалить' }))) return;
+      const res = await fetch('/api/glossary/term?term=' + encodeURIComponent(term), { method: 'DELETE' });
+      if (res.ok) { toast('Термин удалён'); await loadGlossary(); showModal(renderGlossaryPanel()); wireGlossaryPanel(); }
+      else toast('Не удалось удалить термин');
+    };
+  });
+
+  const input = $('gl-preview-input');
+  if (input) {
+    let timer = null;
+    const run = async () => {
+      const text = input.value;
+      if (!text.trim()) { const out = $('gl-preview-out'); if (out) out.style.display = 'none'; return; }
+      try {
+        const data = await (await fetch('/api/glossary/preview?text=' + encodeURIComponent(text))).json();
+        const out = $('gl-preview-out');
+        if (!out) return;
+        out.style.display = '';
+        out.innerHTML = data.changes && data.changes.length
+          ? escapeHtml(data.text) + '<br><span class="vp-meta">заменено: '
+            + data.changes.map(c => `${escapeHtml(c.from)} → ${escapeHtml(c.to)}`).join(', ') + '</span>'
+          : escapeHtml(data.text) + '<br><span class="vp-meta">замен нет</span>';
+      } catch { /* ignore */ }
+    };
+    input.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
+  }
+}
+
+function showGlossaryAddForm() {
+  showModal(`
+    <h1>Новый термин</h1>
+    <p class="sub" style="text-align:left">Как термин должен выглядеть в тексте и как его
+       обычно слышно. Варианты — через запятую.</p>
+    <label class="field"><span>Термин</span>
+      <input type="text" id="gl-term" placeholder="например: Kubernetes"></label>
+    <label class="field" style="margin-top:10px"><span>Варианты (как слышится)</span>
+      <input type="text" id="gl-aliases" placeholder="например: кубернетес, кубер"></label>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px">
+      <button class="btn" id="gl-cancel">Отмена</button>
+      <button class="btn accent" id="gl-save">Сохранить</button>
+    </div>`);
+  $('gl-term').focus();
+  $('gl-cancel').onclick = () => { showModal(renderGlossaryPanel()); wireGlossaryPanel(); };
+  $('gl-save').onclick = async () => {
+    const term = $('gl-term').value.trim();
+    const aliases = $('gl-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!term) { toast('Укажите термин'); return; }
+    if (!aliases.length) { toast('Нужен хотя бы один вариант'); return; }
+    const res = await fetch('/api/glossary/term', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term, aliases }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Не удалось сохранить: ' + (data.detail || res.status)); return; }
+    toast('Термин сохранён');
+    await loadGlossary();
+    showModal(renderGlossaryPanel()); wireGlossaryPanel();
+  };
+}
+
+async function exportGlossary() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.save_glossary_as) {
+    try {
+      const path = await window.pywebview.api.save_glossary_as();
+      if (path) toast('Сохранено: ' + path);
+    } catch (err) { toast('Не удалось сохранить: ' + err); }
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = withToken('/api/glossary/export');
+  link.download = 'nestor-hotwords.yaml';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function importGlossary() {
+  const finish = async (res) => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    toast(`Импорт: +${data.added} новых, заменено ${data.replaced}`);
+    await loadGlossary();
+    showModal(renderGlossaryPanel()); wireGlossaryPanel();
+  };
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.open_glossary_file) {
+    try {
+      const path = await window.pywebview.api.open_glossary_file();
+      if (!path) return;
+      await finish(await fetch('/api/glossary/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      }));
+    } catch (err) { toast('Не удалось импортировать: ' + err.message); }
+    return;
+  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.yaml,.yml,.json,application/x-yaml,application/json';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      await finish(await fetch('/api/glossary/import', { method: 'POST', body }));
+    } catch (err) { toast('Не удалось импортировать: ' + err.message); }
+  };
+  input.click();
+}
+
+$('btn-glossary').onclick = async () => {
+  await loadGlossary();
+  showModal(renderGlossaryPanel());
+  wireGlossaryPanel();
+};
+
 // the "Похожие голоса" pill is always on the home screen
 $('merge-pills').addEventListener('click', (e) => setPill('merge-pills', e.target));
 
@@ -4635,6 +4856,7 @@ async function boot() {
   } catch (e) { /* keep the plain label */ }
   loadVoiceprints();
   loadSettings();
+  loadGlossary();
   await loadRail();
   // the window may have been reloaded while a job was still running
   if (state.recordings.some(isWorking)) watch();
