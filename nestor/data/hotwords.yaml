@@ -154,6 +154,284 @@
 # ==========================================
 # 4. СТРОИТЕЛЬСТВО И ПОДДЕРЖКА СОТОВОЙ СВЯЗИ
 # ==========================================
+# ==========================================
+# 1. СЕТИ И ПРОТОКОЛЫ
+# ==========================================
+- term: "HTTP"
+  aliases: ["эйч ти ти пи", "http", "хттп", "эйч-ти-ти-пи"]
+- term: "HTTPS"
+  aliases: ["эйч ти ти пи эс", "https", "хттпс", "эйч-ти-ти-пи-эс"]
+- term: "SSH"
+  aliases: ["эс эс эйч", "ssh", "эс-эс-эйч"]
+- term: "FTP"
+  aliases: ["эф ти пи", "ftp", "эф-ти-пи"]
+- term: "SFTP"
+  aliases: ["эс эф ти пи", "sftp", "сфтп"]
+- term: "MFT"
+  aliases: ["эм эф ти", "mft", "эм-эф-ти"]
+- term: "NTP"
+  aliases: ["эн ти пи", "ntp", "сервис точного времени"]
+- term: "SAN"
+  aliases: ["эс эй эн", "san", "сеть хранения данных"]
+- term: "L2TP"
+  aliases: ["эл ту ти пи", "l2tp", "л два ти пи"]
+- term: "RDP"
+  aliases: ["эр ди пи", "rdp", "эр-ди-пи", "удалённый рабочий стол"]
+- term: "CGNAT"
+  aliases: ["си джи нат", "cgnat", "си-джи-нат"]
+- term: "DPI"
+  aliases: ["ди пи ай", "dpi", "ди-пи-ай"]
+- term: "IPFIX"
+  aliases: ["ай пи фикс", "ipfix", "и пи фикс"]
+- term: "IPAM"
+  aliases: ["айпам", "ай пи эй эм", "ipam", "ипам"]
+- term: "DCIM"
+  aliases: ["ди си ай эм", "dcim", "дисим"]
+- term: "NOC"
+  aliases: ["эн оу си", "noc", "эн-оу-си"]
+- term: "OSS"
+  aliases: ["о эс эс", "oss", "о-эс-эс"]
+- term: "BSS"
+  aliases: ["би эс эс", "bss", "би-эс-эс"]
+- term: "NMS"
+  aliases: ["эн эм эс", "nms", "эн-эм-эс"]
+- term: "DWH"
+  aliases: ["дэ даблъю эйч", "dwh", "двх"]
+- term: "EDW"
+  aliases: ["и ди даблъю", "edw", "и-ди-даблъю"]
+- term: "ETL"
+  aliases: ["и ти эл", "etl", "и-ти-эл"]
+
+# ==========================================
+# 2. ИНФРАСТРУКТУРА И МОНИТОРИНГ
+# ==========================================
+- term: "Kafka"
+  aliases: ["кафка", "kafka", "кафку"]
+- term: "ELK"
+  aliases: ["елк", "elk", "и эл кей", "е-эл-кей"]
+- term: "ClickHouse"
+  aliases: ["кликхаус", "clickhouse", "клик хаус"]
+- term: "Grafana"
+  aliases: ["графана", "grafana", "графану"]
+- term: "Zabbix"
+  aliases: ["заббикс", "забикс", "zabbix", "забик"]
+- term: "Netcool"
+  aliases: ["неткул", "netcool", "нет кул"]
+- term: "Splunk"
+  aliases: ["спланк", "splunk", "сплунк"]
+- term: "Flink"
+  aliases: ["флинк", "flink"]
+- term: "NetBackup"
+  aliases: ["нетбэкап", "netbackup", "нет бэкап"]
+- term: "RemoteApp"
+  aliases: ["ремоте-апп", "ремоутэпп", "remoteapp", "ремоут апп"]
+
+# ==========================================
+# 3. ВИРТУАЛИЗАЦИЯ И ПЛАТФОРМЫ
+# ==========================================
+- term: "VDI"
+  aliases: ["вди", "ви ди ай", "vdi", "ви-ди-ай"]
+- term: "OpenStack"
+  aliases: ["опенстек", "openstack", "опен стек"]
+- term: "CEPH"
+  aliases: ["с э ф", "цеф", "ceph", "сеф"]
+- term: "S3"
+  aliases: ["эс три", "эс-три"]
+- term: "vSphere"
+  aliases: ["висфера", "ви сфера", "vsphere", "всфера"]
+- term: "XenApp"
+  aliases: ["зенапп", "ксенап", "xenapp", "зен апп"]
+
+# ==========================================
+# 4. РАЗРАБОТКА И DEVOPS
+# ==========================================
+- term: "GitLab"
+  aliases: ["гитлаб", "gitlab", "гит лаб"]
+- term: "JIRA"
+  aliases: ["джира", "jira", "жира", "джиру"]
+- term: "SharePoint"
+  aliases: ["шерепойнт", "шарепойнт", "sharepoint", "шерпоинт"]
+- term: "Ansible"
+  aliases: ["энсибл", "ansible", "ансибл"]
+- term: "AWX"
+  aliases: ["эй даблъю икс", "awx", "эй-даблъю-икс"]
+- term: "Foreman"
+  aliases: ["форман", "foreman", "форэман"]
+- term: "Vault"
+  aliases: ["волт", "vault", "воулт"]
+- term: "NetBox"
+  aliases: ["нетбокс", "netbox", "нет бокс"]
+- term: "n8n"
+  aliases: ["эн восемь эн", "n8n", "эн эйт эн"]
+- term: "Kaiten"
+  aliases: ["кайтен", "kaiten"]
+- term: "OpenProject"
+  aliases: ["опен проджект", "openproject", "опен проект"]
+- term: "Wiki"
+  aliases: ["вики", "wiki", "вику"]
+- term: "Zulip"
+  aliases: ["зулип", "zulip"]
+- term: "TrueConf"
+  aliases: ["труконф", "trueconf", "тру конф"]
+- term: "BPM"
+  aliases: ["би пи эм", "bpm", "би-пи-эм"]
+- term: "BPMS"
+  aliases: ["би пи эм эс", "bpms", "би-пи-эм-эс"]
+- term: "SQL"
+  aliases: ["эс кью эл", "sql", "эс ку эл"]
+- term: "TFS"
+  aliases: ["ти эф эс", "tfs", "ти-эф-эс"]
+- term: "SCCM"
+  aliases: ["эс си си эм", "sccm", "эс-си-си-эм"]
+- term: "SCOM"
+  aliases: ["эс ком", "scom", "эс-ком"]
+- term: "DPM"
+  aliases: ["ди пи эм", "dpm", "ди-пи-эм"]
+- term: "Exchange"
+  aliases: ["экчендж", "exchange", "ексчейндж", "экченж"]
+
+# ==========================================
+# 5. ДАННЫЕ И АНАЛИТИКА
+# ==========================================
+- term: "BI"
+  aliases: ["би ай", "бизнес-аналитика"]
+- term: "KPI"
+  aliases: ["кей пи ай", "kpi", "ка пи ай"]
+- term: "MDM"
+  aliases: ["эм ди эм", "mdm", "эм-ди-эм"]
+- term: "DSP"
+  aliases: ["ди эс пи", "dsp", "ди-эс-пи"]
+- term: "DataHub"
+  aliases: ["датахаб", "datahub", "дата хаб"]
+- term: "PowerCenter"
+  aliases: ["пауэр центр", "powercenter", "повер центр"]
+- term: "Erwin"
+  aliases: ["эрвин", "erwin"]
+- term: "Celonis"
+  aliases: ["челонис", "celonis", "селонис"]
+- term: "Alation"
+  aliases: ["алейшн", "алатион", "alation"]
+- term: "Superset"
+  aliases: ["суперсет", "superset", "апачи суперсет"]
+
+# ==========================================
+# 6. ИНФОРМАЦИОННАЯ БЕЗОПАСНОСТЬ
+# ==========================================
+- term: "SIEM"
+  aliases: ["сиэм", "siem", "си эм", "с и эм"]
+- term: "SOAR"
+  aliases: ["соар", "soar", "со-ар"]
+- term: "SOC"
+  aliases: ["эс оу си", "soc", "эс-оу-си"]
+- term: "WAF"
+  aliases: ["ваф", "waf", "вэ-а-эф"]
+- term: "NGFW"
+  aliases: ["нгфв", "ngfw", "эн джи эф даблъю"]
+- term: "DLP"
+  aliases: ["ди эл пи", "dlp", "ди-эл-пи"]
+- term: "DDoS"
+  aliases: ["ддос", "ddos", "д дос"]
+- term: "IDS"
+  aliases: ["ай ди эс", "ids", "ай-ди-эс"]
+- term: "IPS"
+  aliases: ["ай пи эс", "ips", "ай-пи-эс"]
+- term: "PKI"
+  aliases: ["пи ки ай", "pki", "пи-ки-ай"]
+- term: "PIM"
+  aliases: ["пим", "pim", "пи ай эм"]
+- term: "IDM"
+  aliases: ["айдиэм", "idm", "ай ди эм"]
+- term: "TACACS"
+  aliases: ["такакс", "tacacs", "такакс плюс"]
+- term: "2FA"
+  aliases: ["два эф эй", "2fa", "двухфакторка", "двухфакторная аутентификация"]
+- term: "MFA"
+  aliases: ["эм эф эй", "mfa", "мультифакторная аутентификация"]
+- term: "Kaspersky"
+  aliases: ["касперский", "kaspersky", "касперски"]
+- term: "KATA"
+  aliases: ["ката", "kata", "к а т а"]
+- term: "KUMA"
+  aliases: ["кума", "kuma", "к ю эм эй"]
+- term: "MaxPatrol"
+  aliases: ["макспатруль", "макс патруль", "maxpatrol"]
+- term: "Sandbox"
+  aliases: ["сандбокс", "sandbox", "песочница"]
+- term: "СОРМ"
+  aliases: ["сорм", "sorm", "сорм один", "сорм два"]
+
+# ==========================================
+# 7. СВЯЗЬ И ТЕЛЕКОМ
+# ==========================================
+- term: "EPC"
+  aliases: ["и пи си", "epc", "иписи"]
+- term: "PCEF"
+  aliases: ["пи си и эф", "pcef", "пцеф"]
+- term: "OCS"
+  aliases: ["оу си эс", "ocs", "о си эс"]
+- term: "GLR"
+  aliases: ["джи эл ар", "glr", "джи-эл-ар"]
+- term: "IMS"
+  aliases: ["ай эм эс", "ims", "и эм эс"]
+- term: "MVNO"
+  aliases: ["мвно", "mvno", "эм ви эн оу"]
+- term: "MVNE"
+  aliases: ["мвне", "mvne", "эм ви эн и"]
+- term: "MNP"
+  aliases: ["эм эн пи", "mnp", "перенос номера"]
+- term: "RBT"
+  aliases: ["эр би ти", "rbt", "ринг бэк тон", "гудок"]
+- term: "iSBC"
+  aliases: ["ай эс би си", "isbc", "айсбиси"]
+- term: "AGCF"
+  aliases: ["эй джи си эф", "agcf", "а джи си эф"]
+- term: "SBC"
+  aliases: ["эс би си", "sbc", "эс-би-си"]
+- term: "PTT"
+  aliases: ["пи ти ти", "ptt", "push to talk", "пуш ту ток"]
+- term: "VoWiFi"
+  aliases: ["во вайфай", "vowifi", "во вай фай"]
+- term: "SON"
+  aliases: ["эс оу эн", "son", "self organizing network", "самоорганизующаяся сеть"]
+- term: "CDR"
+  aliases: ["си ди ар", "cdr", "цдр"]
+- term: "MMSC"
+  aliases: ["эм эм эс си", "mmsc", "эм-эм-эс-си"]
+- term: "SMSC"
+  aliases: ["эс эм эс си", "smsc", "эс-эм-эс-си"]
+- term: "A2P"
+  aliases: ["эй ту пи", "a2p", "эй-ту-пи"]
+- term: "EDI"
+  aliases: ["и ди ай", "edi", "е-ди-ай"]
+- term: "IVR"
+  aliases: ["ай ви ар", "ivr", "айвиар"]
+- term: "ACD"
+  aliases: ["эй си ди", "acd", "автоматическое распределение вызовов"]
+
+# ==========================================
+# 8. КОРПОРАТИВНЫЕ СИСТЕМЫ
+# ==========================================
+- term: "1С"
+  aliases: ["один эс", "первый эс"]
+- term: "SAP"
+  aliases: ["сап", "sap", "эс эй пи"]
+- term: "CRM"
+  aliases: ["си ар эм", "crm", "црм"]
+- term: "ERP"
+  aliases: ["и ар пи", "erp", "иарпи"]
+- term: "HRIS"
+  aliases: ["эйч ар ай эс", "hris", "эйч-ар-ай-эс"]
+- term: "LMS"
+  aliases: ["эл эм эс", "lms", "эл-эм-эс"]
+- term: "WFM"
+  aliases: ["даблъю эф эм", "wfm", "даблъю-эф-эм"]
+- term: "B2B"
+  aliases: ["би ту би", "b2b", "би-ту-би"]
+- term: "B2C"
+  aliases: ["би ту си", "b2c", "би-ту-си"]
+- term: "API Gateway"
+  aliases: ["эй пи ай гейтвей", "api gateway", "эпиай шлюз"]
+
 # --- Базовая архитектура GSM/UMTS/LTE ---
 - term: "GSM"
   aliases: ["гсм", "gsm", "джи эс эм"]
