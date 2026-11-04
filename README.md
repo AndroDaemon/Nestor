@@ -1,5 +1,7 @@
 # Nestor
 
+[![CI](https://github.com/AndroDaemon/Nestor/actions/workflows/ci.yml/badge.svg)](https://github.com/AndroDaemon/Nestor/actions/workflows/ci.yml)
+
 Offline **транскрибация + диаризация** речи на CPU. Настольное приложение для Windows и CLI.
 
 * **ASR**: [GigaAM v3](https://github.com/salute-developers/GigaAM) — punct-транcдьюсер ONNX с пунктуацией (sherpa-onnx), русский язык, MIT
