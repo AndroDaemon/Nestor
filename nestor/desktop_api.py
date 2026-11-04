@@ -23,6 +23,22 @@ except ImportError:  # pragma: no cover - exercised only without pywebview
 from .library import Library
 
 
+def dialog_constant(name: str):
+    """pywebview file-dialog constant (``SAVE``/``OPEN``).
+
+    ``webview.FileDialog`` is the current API, ``webview.SAVE_DIALOG`` the
+    legacy one. When pywebview is unavailable (headless CI), fall back to the
+    plain name so the call path still works against a stub window."""
+    if webview is not None:
+        file_dialog = getattr(webview, "FileDialog", None)
+        if file_dialog is not None and hasattr(file_dialog, name):
+            return getattr(file_dialog, name)
+        legacy = getattr(webview, f"{name}_DIALOG", None)
+        if legacy is not None:
+            return legacy
+    return name
+
+
 def downloads_folder() -> Path:
     """Where exported files are placed by default."""
     env = os.environ.get("NESTOR_EXPORT_DIR")
@@ -102,8 +118,7 @@ class DesktopApi:
 
         try:
             # FileDialog.SAVE is the non-deprecated constant (== SAVE_DIALOG)
-            save_const = getattr(webview, "FileDialog", None)
-            dialog_type = save_const.SAVE if save_const else webview.SAVE_DIALOG
+            dialog_type = dialog_constant("SAVE")
             result = self._window.create_file_dialog(
                 dialog_type,
                 directory=str(downloads_folder()),
@@ -143,13 +158,14 @@ class DesktopApi:
         if not self._window:
             return None
         name = (filename or "").strip() or "nestor-report.txt"
-        # keep a single path component: never let a caller traverse folders
-        name = Path(name).name
+        # keep a single path component: never let a caller traverse folders.
+        # Split on both separators so the guard also holds on POSIX hosts,
+        # where backslash is an ordinary filename character.
+        name = name.replace("\\", "/").split("/")[-1]
         if not name.lower().endswith(".txt"):
             name += ".txt"
         try:
-            save_const = getattr(webview, "FileDialog", None)
-            dialog_type = save_const.SAVE if save_const else webview.SAVE_DIALOG
+            dialog_type = dialog_constant("SAVE")
             result = self._window.create_file_dialog(
                 dialog_type,
                 directory=str(downloads_folder()),
@@ -195,8 +211,7 @@ class DesktopApi:
         """Native Open dialog for media files; returns chosen paths."""
         if not self._window:
             return []
-        save_const = getattr(webview, "FileDialog", None)
-        dialog_type = save_const.OPEN if save_const else webview.OPEN_DIALOG
+        dialog_type = dialog_constant("OPEN")
         try:
             result = self._window.create_file_dialog(
                 dialog_type,
@@ -240,8 +255,7 @@ class DesktopApi:
         stamp = datetime.now().strftime("%Y-%m-%d")
         default_name = f"nestor-voices{'-' + str(count) if query else ''}-{stamp}.json"
         try:
-            save_const = getattr(webview, "FileDialog", None)
-            dialog_type = save_const.SAVE if save_const else webview.SAVE_DIALOG
+            dialog_type = dialog_constant("SAVE")
             result = self._window.create_file_dialog(
                 dialog_type,
                 directory=str(downloads_folder()),
@@ -265,8 +279,7 @@ class DesktopApi:
         if not self._window:
             return None
         try:
-            save_const = getattr(webview, "FileDialog", None)
-            dialog_type = save_const.OPEN if save_const else webview.OPEN_DIALOG
+            dialog_type = dialog_constant("OPEN")
             result = self._window.create_file_dialog(
                 dialog_type,
                 file_types=(
