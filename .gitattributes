@@ -1,0 +1,22 @@
+# Keep binary assets untouched by git's text handling (no EOL conversion).
+*.ico       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.pptx      binary
+*.docx      binary
+*.xlsx      binary
+*.pdf       binary
+*.onnx      binary
+*.npz       binary
+*.wav       binary
+*.mp3       binary
+*.m4a       binary
+*.opus      binary
+*.flac      binary
+*.webm      binary
+*.mp4       binary
+*.exe       binary
+*.dll       binary
+*.zip       binary

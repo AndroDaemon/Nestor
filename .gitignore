@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+out/
+out2/
+out3/
+out_offline/
+nestor_work/
+nestor_work_test/
+samples/
+.pytest_cache/
+.mypy_cache/
+.env
+*.onnx
+*.ckpt
+*.wav
+# Inno Setup output (relative to the .iss location)
+packaging/output/
+install.log
+
+releases/
+
+# Local MCP/dev credentials — never publish
+opencode.json
+
+# Internal and client-only materials kept next to the repo, not inside it
+_publish_internal/
+
+# Throwaway dirs from local verification
+.pytest_tmp/
+.wheel_check/

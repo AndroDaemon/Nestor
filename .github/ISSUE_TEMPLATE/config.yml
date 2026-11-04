@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопрос по использованию
+    url: https://github.com/AndroDaemon/Nestor/blob/master/docs/rukovodstvo.md
+    about: Руководство пользователя — как работать с приложением, настройки, частые проблемы.
+  - name: Уязвимость или приватность
+    url: https://github.com/AndroDaemon/Nestor/blob/master/SECURITY.md
+    about: Как сообщить о проблеме безопасности — не через публичный issue.

@@ -1,0 +1,37 @@
+name: Feature request
+description: Предложить улучшение Nestor
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Есть идея? Опишите задачу, а не только решение — так проще подобрать
+        правильный путь.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: С какой трудностью вы столкнулись?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Как вы решаете это сейчас?
+    validations:
+      required: false
+  - type: checkboxes
+    id: offline
+    attributes:
+      label: Ограничение проекта
+      options:
+        - label: Предложение совместимо с полностью офлайн-работой (без сети во время работы).
+          required: true

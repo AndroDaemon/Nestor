@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<!--
+  Nestor app icon: a symbolic audio waveform (white bars) crossed by a
+  handwritten stroke (magenta). Rendered headless:
+
+    chrome.exe --headless=new --screenshot=icon_1024.png --window-size=1024,1024 icon_src.html
+
+  then converted to a multi-size .ico with PIL (see build notes in nestor.spec).
+-->
+<style>
+  html, body { margin:0; padding:0; width:1024px; height:1024px; background:#000; overflow:hidden; }
+  body { display:flex; align-items:center; justify-content:center; }
+  svg { width:900px; height:900px; display:block; }
+</style>
+</head>
+<body>
+  <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <!-- audio graph: five rounded bars, the middle one peaking -->
+    <g fill="#FFFFFF">
+      <rect x="66"  y="116" width="52" height="104" rx="26"/>
+      <rect x="148" y="70"  width="52" height="196" rx="26"/>
+      <rect x="230" y="34"  width="52" height="268" rx="26"/>
+      <rect x="312" y="82"  width="52" height="172" rx="26"/>
+      <rect x="394" y="108" width="52" height="120" rx="26"/>
+    </g>
+    <!-- handwriting: a cursive stroke with a closing flourish -->
+    <path d="M76 412 C96 342 140 342 156 402
+             C170 456 210 460 230 402
+             C246 352 292 352 308 406
+             C322 458 358 456 378 402
+             C392 370 412 354 444 348"
+          fill="none" stroke="#FF3495" stroke-width="30"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</body>
+</html>

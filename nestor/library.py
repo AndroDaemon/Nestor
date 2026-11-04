@@ -1,0 +1,375 @@
+"""Persistent library of recordings.
+
+Layout inside the data root (default ``%LOCALAPPDATA%\\Nestor``)::
+
+    uploads/<id>/<filename>   original file
+    output/<id>/record.json   editable transcript
+    output/<id>/<name>.docx   exports (generated on demand)
+    peaks/<id>.json           waveform peaks for the player
+    log.txt                   journal of what the app did
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import contextlib
+import shutil
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+
+def default_root() -> Path:
+    """Where the library lives by default."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return Path(base) / "Nestor"
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "Nestor"
+
+
+@dataclass
+class Segment:
+    """One utterance in the editable transcript."""
+
+    id: str
+    start: float
+    end: float
+    speaker: str
+    text: str = ""
+    bookmark: bool = False
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Segment":
+        return cls(
+            id=str(data.get("id") or uuid.uuid4().hex[:8]),
+            start=float(data.get("start", 0.0)),
+            end=float(data.get("end", 0.0)),
+            speaker=str(data.get("speaker", "SPEAKER_00")),
+            text=str(data.get("text", "")),
+            bookmark=bool(data.get("bookmark", False)),
+        )
+
+
+@dataclass
+class Recording:
+    """A processed recording with its editable transcript."""
+
+    id: str
+    filename: str
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
+    status: str = "queued"
+    stage: str = ""
+    progress: float = 0.0
+    error: Optional[str] = None
+    duration: float = 0.0
+    model: str = ""
+    diarization_model: Optional[str] = None
+    rtf: Optional[float] = None
+    processing_seconds: Optional[float] = None
+    # wall-clock seconds per stage of the last run: decode/diarization/transcription/voiceprints
+    stage_seconds: Dict[str, float] = field(default_factory=dict)
+    # diagnostics of the last run: hardware, resolved threads, pinning, settings
+    run_meta: Dict[str, object] = field(default_factory=dict)
+    speaker_names: Dict[str, str] = field(default_factory=dict)
+    # label -> {assigned_name, confidence, candidates, reason} (voiceprints)
+    speaker_match: Dict[str, dict] = field(default_factory=dict)
+    # settings of the (last) transcription job - prefill the "process again" dialog
+    job_settings: Dict[str, object] = field(default_factory=dict)
+    # absolute path of an imported file that was NOT copied into uploads/
+    source_path: Optional[str] = None
+    # result of the last speakers-only run: "12 → 9 · перенесено 143 реплики"
+    speakers_diff: Optional[str] = None
+    # human-readable alias shown over the filename in the records table
+    title: Optional[str] = None
+    # free-form notes, edited from the records table (Buzz-style)
+    notes: Optional[str] = None
+    segments: List[Segment] = field(default_factory=list)
+
+    # ------------------------------------------------------------------ helpers
+    @property
+    def speakers(self) -> List[str]:
+        seen: List[str] = []
+        for segment in self.segments:
+            if segment.speaker not in seen:
+                seen.append(segment.speaker)
+        return seen
+
+    def speaker_label(self, speaker: str) -> str:
+        return self.speaker_names.get(speaker, speaker)
+
+    def to_dict(self) -> Dict:
+        data = asdict(self)
+        data["speakers"] = self.speakers
+        data["segments"] = [asdict(segment) for segment in self.segments]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Recording":
+        recording = cls(
+            id=str(data["id"]),
+            filename=str(data.get("filename", "")),
+            created_at=str(data.get("created_at", "")),
+            status=str(data.get("status", "done")),
+            stage=str(data.get("stage", "")),
+            progress=float(data.get("progress", 0.0)),
+            error=data.get("error"),
+            duration=float(data.get("duration", 0.0)),
+            model=str(data.get("model", "")),
+            diarization_model=data.get("diarization_model"),
+            rtf=data.get("rtf"),
+            processing_seconds=data.get("processing_seconds"),
+            stage_seconds=dict(data.get("stage_seconds", {}) or {}),
+            run_meta=dict(data.get("run_meta", {}) or {}),
+            speaker_names=dict(data.get("speaker_names", {})),
+            speaker_match=dict(data.get("speaker_match", {}) or {}),
+            job_settings=dict(data.get("job_settings", {}) or {}),
+            source_path=data.get("source_path"),
+            speakers_diff=data.get("speakers_diff"),
+            title=data.get("title"),
+            notes=data.get("notes"),
+        )
+        recording.segments = [
+            Segment.from_dict(item) for item in data.get("segments", [])
+        ]
+        return recording
+
+
+class Library:
+    """File-backed storage of recordings."""
+
+    def __init__(self, root: Optional[Path] = None) -> None:
+        self.root = Path(root) if root else default_root()
+        self.uploads_dir = self.root / "uploads"
+        self.output_dir = self.root / "output"
+        self.peaks_dir = self.root / "peaks"
+        self.embeddings_dir = self.root / "embeddings"
+        self.log_path = self.root / "log.txt"
+        for directory in (self.uploads_dir, self.output_dir, self.peaks_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+        # id -> (mtime_ns, size, parsed record.json dict). The UI polls the
+        # recording list while a job runs; re-parsing every transcript on each
+        # poll was the single heaviest periodic cost of the whole app.
+        self._record_cache: Dict[str, tuple] = {}
+
+    # ------------------------------------------------------------------ logging
+    def log(self, message: str) -> None:
+        """Append a line to the journal."""
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"[{stamp}] {message}\n")
+        except OSError:
+            pass
+
+    # ------------------------------------------------------------------ records
+    def record_path(self, record_id: str) -> Path:
+        return self.output_dir / record_id / "record.json"
+
+    def save(self, recording: Recording, create: bool = True) -> Recording:
+        """Persist the recording metadata and transcript.
+
+        The write is atomic (temp file + ``os.replace``) so concurrent readers
+        never see a half-written JSON. On Windows ``os.replace`` fails while
+        another thread holds the destination open for reading, so the replace
+        is retried briefly before falling back to a direct overwrite.
+        With ``create=False`` an already deleted record is NOT resurrected:
+        the call returns without writing (used by the editor PUT, which may
+        race the deletion of the same record).
+        """
+        path = self.record_path(recording.id)
+        if not create and not path.exists():
+            return recording
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = recording.to_dict()
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        for attempt in range(10):
+            try:
+                os.replace(tmp, path)
+                self._remember(recording.id, path, data)
+                return recording
+            except PermissionError:
+                # a concurrent reader (UI polling) holds the file open
+                time.sleep(0.01 + 0.01 * attempt)
+        # readers would not go away — overwrite in place instead
+        path.write_text(payload, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+        self._remember(recording.id, path, data)
+        return recording
+
+    def _remember(self, record_id: str, path: Path, data: Dict) -> None:
+        """Seed the list cache with a record we have just written.
+
+        Keyed by the file's mtime/size, so a later external edit is noticed;
+        the payload is the dict we wrote, not the file we would re-read."""
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        self._record_cache[record_id] = (stat.st_mtime_ns, stat.st_size, data)
+
+    def _read_record_data(self, path: Path) -> Optional[Dict]:
+        """Parse record.json, retrying around the Windows replace lock."""
+        for attempt in range(5):
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except PermissionError:
+                # Windows: a concurrent atomic replace momentarily locks the file
+                time.sleep(0.01 + 0.01 * attempt)
+            except (OSError, ValueError):
+                return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def load(self, record_id: str) -> Optional[Recording]:
+        path = self.record_path(record_id)
+        if not path.exists():
+            return None
+        data = self._read_record_data(path)
+        if data is None:
+            return None
+        try:
+            return Recording.from_dict(data)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def list(self) -> List[Recording]:
+        """All known recordings, newest first.
+
+        Each manifest is parsed once and reused while its mtime/size is
+        unchanged, so polling the list (once per second during a job) does not
+        re-read every transcript from disk. Mutating the returned recordings
+        is safe: they are rebuilt from the cached dict on every call.
+        """
+        recordings: List[Recording] = []
+        if not self.output_dir.exists():
+            self._record_cache.clear()
+            return recordings
+        present = set()
+        for directory in self.output_dir.iterdir():
+            if not directory.is_dir():
+                continue
+            record_id = directory.name
+            path = directory / "record.json"
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            present.add(record_id)
+            cached = self._record_cache.get(record_id)
+            if (
+                cached is not None
+                and cached[0] == stat.st_mtime_ns
+                and cached[1] == stat.st_size
+            ):
+                data = cached[2]
+            else:
+                data = self._read_record_data(path)
+                if data is None:
+                    continue
+                self._record_cache[record_id] = (stat.st_mtime_ns, stat.st_size, data)
+            try:
+                recordings.append(Recording.from_dict(data))
+            except (KeyError, TypeError, ValueError):
+                continue
+        # forget manifests whose directory is gone
+        for stale in [rid for rid in self._record_cache if rid not in present]:
+            self._record_cache.pop(stale, None)
+        # newest first; the id tiebreak keeps the order stable across polls
+        # when two records share a created_at (ISO seconds, so exact ties happen)
+        recordings.sort(key=lambda r: r.id)
+        recordings.sort(key=lambda r: r.created_at, reverse=True)
+        return recordings
+
+    def delete(self, record_id: str) -> bool:
+        """Remove a recording with all its files.
+
+        Idempotent: if the record manifest is already gone, leftover files
+        (a half-removed earlier attempt) are cleaned up and the call still
+        succeeds.
+        """
+        recording = self.load(record_id)
+        if recording is None:
+            self._record_cache.pop(record_id, None)
+            # no manifest: clean up possible leftovers and report success
+            self._rmtree(self.output_dir / record_id)
+            self._rmtree(self.uploads_dir / record_id)
+            with contextlib.suppress(OSError):
+                (self.peaks_dir / f"{record_id}.json").unlink(missing_ok=True)
+                self.embeddings_dir.joinpath(f"{record_id}.npz").unlink(missing_ok=True)
+            return self.record_path(record_id).exists() is False
+        if not self._rmtree(self.output_dir / record_id):
+            return False
+        self._record_cache.pop(record_id, None)
+        if not self._rmtree(self.uploads_dir / record_id):
+            return False
+        peak = self.peaks_dir / f"{record_id}.json"
+        npz = self.embeddings_dir / f"{record_id}.npz"
+        try:
+            peak.unlink(missing_ok=True)
+            npz.unlink(missing_ok=True)
+        except OSError:
+            return False
+        self.log(f"deleted recording {record_id} ({recording.filename})")
+        return True
+
+    @staticmethod
+    def _rmtree(directory: Path, attempts: int = 4) -> bool:
+        """shutil.rmtree that reports failure instead of silently keeping a
+        half-deleted (\"zombie\") record: a file briefly locked by a reader on
+        Windows is retried, a persistent lock fails the deletion."""
+        for attempt in range(attempts):
+            shutil.rmtree(directory, ignore_errors=True)
+            if not directory.exists():
+                return True
+            time.sleep(0.2 + 0.2 * attempt)
+        return False
+
+    # ------------------------------------------------------------------- files
+    def source_path(self, record_id: str, filename: str) -> Path:
+        """Path of the original uploaded file."""
+        safe = Path(filename).name
+        return self.uploads_dir / record_id / safe
+
+    def recording_source(self, recording: Recording) -> Path:
+        """Where this recording's media file lives.
+
+        Imported files (from the native Open dialog) are not copied into
+        the library: the record references their original location."""
+        if recording.source_path:
+            return Path(recording.source_path)
+        return self.source_path(recording.id, recording.filename)
+
+    def store_upload(self, record_id: str, filename: str, source: Path) -> Path:
+        """Copy an uploaded file into the library."""
+        target = self.source_path(record_id, filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        return target
+
+    # ------------------------------------------------------------------- peaks
+    def peaks_path(self, record_id: str) -> Path:
+        return self.peaks_dir / f"{record_id}.json"
+
+    def save_peaks(self, record_id: str, peaks: List[float]) -> None:
+        self.peaks_path(record_id).write_text(
+            json.dumps(peaks), encoding="utf-8"
+        )
+
+    def load_peaks(self, record_id: str) -> List[float]:
+        path = self.peaks_path(record_id)
+        if not path.exists():
+            return []
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
