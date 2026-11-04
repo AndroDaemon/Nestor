@@ -2,7 +2,7 @@
 ; Compiler: ISCC (Inno Setup Compiler)
 
 #define MyAppName "Nestor"
-#define MyAppVersion "1.3.7"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Nestor"
 #define MyAppExeName "Nestor.exe"
 #define InstallDir "{localappdata}\Nestor"
@@ -17,7 +17,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile=
 OutputDir=output
-OutputBaseFilename=Nestor-Setup-1.3.7
+OutputBaseFilename=Nestor-Setup-1.4.0
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest

@@ -94,6 +94,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable voiceprint matching for this run",
     )
     transcribe.set_defaults(match_voiceprints=None)
+    transcribe.add_argument(
+        "--glossary",
+        dest="glossary",
+        action="store_true",
+        default=False,
+        help="rewrite recognised terms to canonical form (hotwords.yaml)",
+    )
+    transcribe.add_argument(
+        "--glossary-path",
+        default=None,
+        help="path to a custom glossary YAML (default: bundled/user file)",
+    )
     transcribe.add_argument("--quiet", action="store_true")
     transcribe.set_defaults(func=cmd_transcribe)
 
@@ -224,6 +236,8 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir),
         formats=formats,
         speaker_labels=labels,
+        glossary=args.glossary,
+        glossary_path=Path(args.glossary_path) if args.glossary_path else None,
         quiet=args.quiet,
     )
     if args.match_voiceprints is not None:

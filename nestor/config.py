@@ -70,6 +70,13 @@ class Config:
     # meeting can collapse into a single speaker.
     merge_segment_floor: float = 0.35
 
+    # Glossary: rewrite recognised terms ("докер", "днс") to canonical form
+    # ("Docker", "DNS"). Fully offline, deterministic, no speed impact.
+    glossary: bool = False
+    # Optional path to a user glossary; when None the user file at the data
+    # root is preferred, then the glossary bundled with the package.
+    glossary_path: Optional[Path] = None
+
     # Output
     output_dir: Path = field(default_factory=lambda: Path("out"))
     formats: List[str] = field(default_factory=lambda: list(DEFAULT_FORMATS))

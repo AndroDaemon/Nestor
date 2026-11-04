@@ -741,6 +741,12 @@
               </div>
               <div class="hint">На длинных записях один человек часто распадается на несколько ярлыков — «обычно» их склеивает. «Осторожно» почти ничего не объединяет: выберите его, если Nestor склеил разных людей.</div>
             </label>
+            <div class="group-label">Термины</div>
+            <label class="field wide check-row">
+              <input type="checkbox" id="glossary" style="width:auto">
+              <span>Исправлять термины по словарю</span>
+              <span class="hint">Nestor часто слышит «докер», «днс», «айпи» так, как их произносят. Со словарём он заменяет такие слова на канонические — Docker, DNS, IP-адрес. Работает офлайн, на скорость не влияет и ничего не додумывает: только замены из словаря.</span>
+            </label>
             <div class="group-label">Скорость и нагрузка</div>
             <label class="field" style="margin-top:10px">
               <span>Ядра для обработки</span>
@@ -1046,6 +1052,7 @@ function reportText(rec) {
   lines.push(`  порог объединения: ${settings.merge_threshold ?? '—'}`);
   lines.push(`  улучшение звука: ${settings.audio_enhance == null ? '—' : yes(settings.audio_enhance)}`);
   lines.push(`  восстановление пропусков: ${settings.rescue_holes == null ? '—' : yes(settings.rescue_holes)}`);
+  lines.push(`  исправлять термины по словарю: ${settings.glossary == null ? '—' : yes(settings.glossary)}`);
   return lines.join('\n');
 }
 /* Copy plain text, with a hidden-textarea fallback: WebView2 can deny the
@@ -3546,6 +3553,7 @@ const SETTINGS_CONTROLS = {
   'pin-performance':  { key: 'pin_performance',  kind: 'checked' },
   'merge-pills':  { key: 'merge_min_weight',     kind: 'pill' },
   'threads':      { key: 'threads',              kind: 'int-or-empty' },
+  'glossary':     { key: 'glossary',             kind: 'checked' },
 };
 let serverSettings = {};          // last known server state (source of truth)
 let settingsSaveTimer = null;
@@ -3615,6 +3623,7 @@ function applySettingsToControls() {
     process_priority: (v) => { const el = $('process-priority'); if (el) el.checked = !!v; },
     pin_performance: (v) => { const el = $('pin-performance'); if (el) el.checked = !!v; },
     threads: (v) => { const el = $('threads'); if (el) el.value = v ? String(v) : ''; },
+    glossary: (v) => { const el = $('glossary'); if (el) el.checked = !!v; },
     vp_abs_threshold: (v) => { const el = $('vp-threshold-pills'); if (el) setPillValue(el, v); },
     vp_margin: (v) => { const el = $('vp-margin-pills'); if (el) setPillValue(el, v); },
     vp_segment_agreement: (v) => { const el = $('vp-agreement-pills'); if (el) setPillValue(el, v); },

@@ -65,6 +65,17 @@ def test_merge_settings_roundtrip_and_validation(tmp_path):
         store.update({"merge_threshold": 2.0})
 
 
+def test_glossary_setting_roundtrip(tmp_path):
+    """The glossary toggle is a plain bool setting, off by default."""
+    store = SettingsStore(tmp_path)
+    assert store.as_public()["glossary"] is False
+    store.update({"glossary": True})
+    assert store.as_public()["glossary"] is True
+    assert SettingsStore(tmp_path).as_public()["glossary"] is True
+    with pytest.raises(ValueError):
+        store.update({"glossary": "yes"})
+
+
 def test_damaged_json_quarantined(tmp_path):
     (tmp_path / "settings.json").write_text("{not json at all", encoding="utf-8")
     store = SettingsStore(tmp_path)

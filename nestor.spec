@@ -20,6 +20,8 @@ ONEDIR = True
 datas = []
 # web interface
 datas += [(str(ROOT / "nestor" / "web" / "static"), "nestor/web/static")]
+# bundled glossary (hotwords) for the term-correction pass
+datas += [(str(ROOT / "nestor" / "data" / "hotwords.yaml"), "nestor/data")]
 # demo recording for the "Попробовать на примере" button (served by /api/sample)
 _sample = ROOT / "samples" / "dialogue.webm"
 if _sample.exists():

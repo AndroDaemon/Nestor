@@ -878,6 +878,7 @@ class ProcessOptions(BaseModel):
     diar_min_duration_on: Optional[float] = None
     diar_min_duration_off: Optional[float] = None
     rescue_holes: Optional[bool] = None
+    glossary: Optional[bool] = None
 
 
 class ProcessBody(BaseModel):
@@ -956,6 +957,8 @@ def job_config(
         config.diar_min_duration_off = float(chosen["diar_min_duration_off"])
     if chosen.get("rescue_holes") is not None:
         config.rescue_holes = as_bool(chosen.get("rescue_holes"), True)
+    if chosen.get("glossary") is not None:
+        config.glossary = as_bool(chosen.get("glossary"), False)
     # global runtime setting: worker threads for ASR/diarization models
     try:
         threads = int(SettingsStore(library.root).as_public().get("threads", 0))
@@ -1041,6 +1044,7 @@ def _settings_snapshot(config: Config) -> Dict[str, object]:
         "diar_threshold": config.diar_threshold,
         "audio_enhance": bool(config.audio_enhance),
         "rescue_holes": bool(config.rescue_holes),
+        "glossary": bool(config.glossary),
         "match_voiceprints": bool(config.match_voiceprints),
         "merge_speakers": bool(config.merge_speakers),
         "merge_threshold": config.merge_threshold,
@@ -1403,6 +1407,7 @@ def create_app(
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
             "diar_min_duration_off": settings.get("diar_min_duration_off"),
             "rescue_holes": settings.get("rescue_holes", True),
+            "glossary": settings.get("glossary", False),
         }
         lib.save(recording)
         lib.log(f"import {source.name} from {source.parent}")

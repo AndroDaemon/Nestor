@@ -48,6 +48,9 @@ SCHEMA: Dict[str, Tuple[str, object]] = {
     "diar_min_duration_off": ("float", (0.0, 5.0)),
     # rescue pass: re-transcribe silent holes between words
     "rescue_holes": ("bool", None),
+    # glossary post-correction: rewrite heard forms ("докер") to canonical
+    # terms ("Docker"); offline text pass, no effect on speed
+    "glossary": ("bool", None),
     # worker threads for ASR/diarization models (0 = auto)
     "threads": ("int", (0, 64)),
     # run heavy jobs at ABOVE_NORMAL priority (opt-in; can starve the UI on
@@ -78,6 +81,7 @@ DEFAULTS: Dict[str, object] = {
     "diar_min_duration_on": 0.5,
     "diar_min_duration_off": 0.0,
     "rescue_holes": True,
+    "glossary": False,
     "threads": 0,
     "process_priority": False,
     "pin_performance": False,

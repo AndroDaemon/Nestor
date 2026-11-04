@@ -287,6 +287,26 @@ def process_file(
 
     words = align.assign_speakers(words, turns)
     segments: List[Segment] = align.merge_words(words)
+
+    # Glossary post-correction: rewrite heard forms ("докер", "днс") to the
+    # canonical term ("Docker", "DNS"). Pure text, offline, no decoder involved.
+    if config.glossary and segments:
+        from .glossary import (
+            apply_to_segments,
+            load_glossary,
+            resolve_glossary_path,
+        )
+        from .library import default_root
+
+        path = (
+            config.glossary_path
+            if config.glossary_path is not None
+            else resolve_glossary_path(default_root())
+        )
+        changed = apply_to_segments(segments, load_glossary(path))
+        if changed:
+            report(f"  glossary: {changed} term(s) corrected")
+
     align.relabel_speakers(segments, config.speaker_labels)
 
     # Voiceprints: cache the embeddings and (optionally) match the library.

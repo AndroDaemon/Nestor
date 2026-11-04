@@ -39,7 +39,7 @@ their own licenses. Attribution and terms:
 * pywebview — BSD-3-Clause; Microsoft Edge WebView2 — Microsoft terms
 * PyTorch, Torchaudio — BSD-3-Clause
 * FFmpeg — LGPL/GPL (invoked as an external process, not linked)
-* NumPy, SciPy, python-docx, SentencePiece, ONNX Runtime — permissive licenses
+* NumPy, SciPy, python-docx, SentencePiece, PyYAML, ONNX Runtime — permissive licenses
 
 The model weights are not part of the source repository; they are downloaded on
 first use or bundled into the installer together with the notices above.
