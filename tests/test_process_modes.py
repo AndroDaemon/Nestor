@@ -608,6 +608,54 @@ def test_speakers_mode_reassigns_and_keeps_text(app, monkeypatch):
     assert loaded.status == "done"
 
 
+class OneSpeakerDiarizer:
+    """Every utterance belongs to a single speaker (the split changed)."""
+
+    model_id = "fake-diarizer"
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def diarize(self, waveform, sample_rate):
+        return [Turn(start=0.0, end=10.0, speaker="SPEAKER_00")]
+
+
+def test_speakers_mode_drops_names_when_split_changes(app, monkeypatch):
+    """QA: a re-run that folds two people into one cluster must not keep their
+    old names on the merged voice — the names are dropped and reported."""
+    library = app.state.library
+    process = _endpoint(app, "POST", "/api/recordings/{record_id}/process")
+    monkeypatch.setattr(app_module, "process_file", lambda *a, **k: None)
+
+    recording = Recording(id="rec2", filename="b.wav", status="done")
+    recording.segments = [
+        Segment("s1", 0.0, 1.5, "SPEAKER_00", "привет"),
+        Segment("s2", 2.0, 3.5, "SPEAKER_01", "пока"),
+    ]
+    recording.speaker_names = {"SPEAKER_00": "Иван", "SPEAKER_01": "Мария"}
+    library.save(recording)
+    (library.uploads_dir / "rec2").mkdir(parents=True, exist_ok=True)
+    (library.uploads_dir / "rec2" / "b.wav").write_bytes(b"fake audio")
+
+    import nestor.pipeline as pipeline_module
+
+    key = (True, "auto", None, cpuinfo.resolve_threads(0))
+    monkeypatch.setitem(
+        pipeline_module._DIARIZER_CACHE, key, (OneSpeakerDiarizer(), threading.Lock())
+    )
+
+    result = process(record_id="rec2", body=ProcessBody(mode="speakers"))
+    assert result["status"] in ("queued", "running")
+    assert _wait_for(lambda: library.load("rec2").status == "done")
+
+    loaded = library.load("rec2")
+    # both utterances now belong to one voice; neither name describes it any more
+    assert loaded.speaker_names == {}
+    assert loaded.speakers == ["SPEAKER_00"]
+    assert "сброшены имена" in (loaded.speakers_diff or "")
+    assert "Иван" in loaded.speakers_diff and "Мария" in loaded.speakers_diff
+
+
 # ------------------------------------------------- cancellation & delete races
 class CancellableDiarizer:
     """Accepts the progress callback and loops until the job asks to stop."""

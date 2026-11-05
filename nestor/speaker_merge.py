@@ -13,8 +13,13 @@ safer than single-linkage chaining, where every pair above the threshold
 transitively collapses a whole recording into one speaker.
 
 Clusters whose total speech is below ``min_weight`` seconds are unreliable by
-construction (their centroid comes from a handful of frames), so they are
-absorbed into their most similar neighbour whatever the similarity.
+construction (their centroid comes from a handful of frames). They may still be
+attached to another cluster, but never below ``threshold``: attaching a short
+utterance to whoever happens to be closest is what folds different people into
+one speaker, so the similarity test is never bypassed. A tiny cluster is also
+only merged into a cluster that is itself substantial (``>= min_weight``),
+otherwise it stays a speaker of its own. Raising ``min_weight`` therefore makes
+the pass more cautious, not more aggressive.
 
 When the individual segment embeddings are supplied (``segment_vectors``), a
 candidate pair must also pass a floor test: the mean similarity between the
@@ -166,13 +171,27 @@ def merge_similar_clusters(
     table = similarities()
 
     if min_weight > 0.0:
-        # tiny clusters are unreliable: hand them to the most similar survivor
+        # Tiny clusters are unreliable on their own, but "unreliable" must not
+        # mean "merge with whoever is closest": folding a short utterance of one
+        # person into another person's cluster is exactly the failure this pass
+        # has to avoid. So a tiny cluster is attached only when it clears the
+        # same similarity threshold as everyone else, and only to a cluster that
+        # is itself substantial (>= min_weight). Otherwise it stays a speaker of
+        # its own, which the user can merge by hand from the UI.
         for small in [i for i in range(size) if weight_of[i] < min_weight]:
             if not alive[small]:
                 continue
             row = table[small]
-            target = int(np.argmax(row))
-            if row[target] <= -2.0:
+            eligible = [
+                i
+                for i in range(size)
+                if alive[i] and i != small and weight_of[i] >= min_weight
+            ]
+            if eligible:
+                target = max(eligible, key=lambda i: float(row[i]))
+            else:
+                target = int(np.argmax(row))
+            if target == small or row[target] < threshold:
                 continue
             keeper, loser = (small, target) if small < target else (target, small)
             apply_merge(loser, keeper)

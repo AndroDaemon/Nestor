@@ -261,7 +261,7 @@ hover, фокус и прокрутка рейла.
 | `toast(msg)` | `#toast`; с `actionLabel`/`actionFn` — тост с кнопкой действия (например «Вернуть» после склейки спикеров), живёт 7 с |
 | `showModal(html)` | `#modal` |
 | `showConfirm(question)` | `#modal`, Promise\<boolean\>; Escape/фон = «отмена» (висящий промис гасится) |
-| `showProcessDialog(rec, mode)` | диалог настроек повторного прохода (full/transcribe/speakers); предупреждения различаются по режиму; для не-`transcribe` содержит число говорящих `#pd-speakers` и объединение голосов `#pd-merge-pills` (`#pd-merge-hint` подсказывает по числу найденных говорящих); шлёт `num_speakers`, `merge_min_weight` и `merge_speakers` в `options` |
+| `showProcessDialog(rec, mode)` | диалог настроек повторного прохода (full/transcribe/speakers); предупреждения различаются по режиму (для `speakers` — что имена сохранятся только при неизменной разбивке); для не-`transcribe` содержит число говорящих `#pd-speakers` и объединение голосов `#pd-merge-pills` (`#pd-merge-hint` подсказывает по числу найденных говорящих); шлёт `num_speakers`, `merge_min_weight` и `merge_speakers` в `options` |
 | `renderResultBar()` | строка результата `#result-bar` под заголовком записи: число говорящих и «Распознать спикеров заново» → `showProcessDialog(rec, 'speakers')` |
 | `startProcess(rec, mode)` | «added» → запуск сразу; всё обработанное и speakers → диалог |
 | `goHome()` | возврат на главный экран (кнопка ⌂ и удаление открытой записи) |

@@ -128,14 +128,43 @@ def test_mapping_covers_every_label_and_is_idempotent():
 
 
 # ----------------------------------------------------------------- min_weight
-def test_min_weight_absorbs_tiny_clusters_regardless_of_threshold():
+def test_min_weight_never_bypasses_the_similarity_threshold():
+    """A tiny cluster is unreliable, but it must still not be glued to a
+    *different* voice: below the threshold it stays a speaker of its own
+    (the user can merge it by hand)."""
     vectors = {"SPEAKER_00": unit(0), "SPEAKER_01": unit(70)}  # cosine ~0.34
     weights = {"SPEAKER_00": 60.0, "SPEAKER_01": 0.7}
     mapping, groups = merge_similar_clusters(
         vectors, 0.95, weights=weights, min_weight=1.0
     )
+    assert len(groups) == 2
+    assert mapping["SPEAKER_01"] == "SPEAKER_01"
+
+
+def test_min_weight_absorbs_a_tiny_cluster_when_it_really_matches():
+    """The tiny-cluster rule only relaxes the *weight*, never the voice test:
+    a genuinely similar short utterance is still folded into the big cluster."""
+    vectors = {"SPEAKER_00": unit(0), "SPEAKER_01": unit(5)}  # cosine ~0.996
+    weights = {"SPEAKER_00": 60.0, "SPEAKER_01": 0.7}
+    mapping, groups = merge_similar_clusters(
+        vectors, 0.9, weights=weights, min_weight=1.0
+    )
     assert len(groups) == 1
     assert mapping["SPEAKER_01"] == "SPEAKER_00"
+
+
+def test_min_weight_cluster_stays_apart_when_no_substantial_neighbour():
+    """With only tiny clusters left, nothing is 'substantial' enough to host a
+    merge — an unrelated short cluster is not silently attached elsewhere."""
+    vectors = {"SPEAKER_00": unit(0), "SPEAKER_01": unit(70), "SPEAKER_02": unit(0)}
+    weights = {"SPEAKER_00": 0.4, "SPEAKER_01": 0.5, "SPEAKER_02": 0.6}
+    mapping, groups = merge_similar_clusters(
+        vectors, 0.9, weights=weights, min_weight=1.0
+    )
+    # SPEAKER_00 and SPEAKER_02 agree (cosine 1.0) and merge; the unrelated one stays
+    assert len(groups) == 2
+    assert mapping["SPEAKER_00"] == mapping["SPEAKER_02"]
+    assert mapping["SPEAKER_01"] == "SPEAKER_01"
 
 
 def test_min_weight_spares_clusters_with_enough_speech():

@@ -866,7 +866,7 @@
                 <button type="button" data-value="1.5" class="on">обычно</button>
                 <button type="button" data-value="3">осторожно</button>
               </div>
-              <div class="hint">На длинных записях один человек часто распадается на несколько ярлыков — «обычно» их склеивает. «Осторожно» почти ничего не объединяет: выберите его, если Nestor склеил разных людей.</div>
+              <div class="hint">На длинных записях один человек часто распадается на несколько ярлыков — «обычно» их склеивает. «Осторожно» склеивает только явно похожие голоса: выберите его, если Nestor склеил разных людей.</div>
             </label>
             <div class="group-label">Термины</div>
             <label class="field wide check-row">
@@ -3760,7 +3760,16 @@ async function watch() {
       if (!state.current || (sameRecord && !state.dirty)) {
         openRecording(finished.id);
       }
-      toast('Расшифровка готова: ' + finished.filename);
+      if (finished.speakers_diff && finished.speakers_diff.includes('сброшены имена')) {
+        // the re-run changed the split, so the old names no longer describe a
+        // single voice: warn instead of quietly going back to "SPEAKER_NN"
+        toast('Разбивка изменилась — имена спикеров сброшены: ' + finished.filename,
+          'Открыть', () => openRecording(finished.id));
+      } else if (finished.speakers_diff) {
+        toast('Разбивка по спикерам обновлена: ' + finished.filename);
+      } else {
+        toast('Расшифровка готова: ' + finished.filename);
+      }
     }
     // keep polling while this session has uploads in flight *or* the server is
     // still busy with a job started before the window was reloaded
@@ -4104,7 +4113,8 @@ function showProcessDialog(rec, mode) {
   const warn = mode === 'speakers'
     ? `Повторной <b>расшифровки не будет</b>: распознанный текст, правки и закладки
        <b>сохранятся</b> — обновится только разбивка по спикерам.
-       Имена, привязанные к старым ярлыкам, переносятся по большинству речи.`
+       Имя сохранится только у тех спикеров, чья разбивка не изменилась; если человек
+       распался на части или слился с другим — имя сбросится, и его нужно назначить заново.`
     : `Для этой записи уже есть результат (${segCount} реплик). Повторный проход создаст
        расшифровку заново — <b>ручные правки текста будут потеряны</b>.`;
   $('modal-body').innerHTML = `
@@ -4159,6 +4169,8 @@ function showProcessDialog(rec, mode) {
       hint.textContent = `«Обычно» объединяет похожие голоса: на длинных записях один человек `
         + `иначе распадается на десятки спикеров.`;
     }
+    hint.textContent += ` «Осторожно» склеивает только явно похожие голоса; `
+      + `имена сохранятся у спикеров с неизменной разбивкой.`;
     group.addEventListener('click', (e) => setPill('pd-merge-pills', e.target));
   }
   $('pd-match').checked = job.match_voiceprints !== false;

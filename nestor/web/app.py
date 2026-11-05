@@ -663,6 +663,7 @@ class Processor:
         # snapshot for the diff shown after the run («12 → 9 · перенесено 143 реплики»)
         before_counts = Counter(s.speaker for s in recording.segments if s.speaker)
         self._moved_segments = 0
+        self._dropped_names: List[str] = []
         try:
             self.library.save(recording)
             self.library.log(f"start speakers-only {recording.filename}")
@@ -748,43 +749,49 @@ class Processor:
                             best_distance, best_speaker = distance, turn.speaker
                 new_labels[id(seg)] = best_speaker or "SPEAKER_00"
 
-            # preserve per-speaker manual names: map old label -> new label by
-            # best time overlap of that speaker's segments
-            def majority(new_label: str) -> str:
-                votes: Dict[str, float] = {}
-                for seg in recording.segments:
-                    if new_labels[id(seg)] != new_label:
-                        continue
-                    votes[seg.speaker] = votes.get(seg.speaker, 0.0) + max(
-                        0.0, seg.end - seg.start
-                    )
-                return max(votes, key=votes.get) if votes else new_label
+            # Preserve a manual name only when the cluster kept its identity.
+            # Diarization may hand the same person a fresh SPEAKER_NN, so we do
+            # not match labels to labels: we match *the speech itself*. A name
+            # survives only if the pairing dominates both the old speaker's
+            # speech and the new cluster's speech (a tiny reshuffle of segment
+            # boundaries is fine). If the speaker fell apart into several
+            # clusters or was merged with somebody else, the name is dropped
+            # (and reported) instead of being carried to a different voice.
+            NAME_PURITY = 0.9
+            durations: Dict[tuple, float] = {}
+            for seg in recording.segments:
+                pair = (seg.speaker, new_labels[id(seg)])
+                durations[pair] = durations.get(pair, 0.0) + max(0.0, seg.end - seg.start)
+            old_total: Dict[str, float] = {}
+            new_total: Dict[str, float] = {}
+            for (old_label, new_label), seconds in durations.items():
+                old_total[old_label] = old_total.get(old_label, 0.0) + seconds
+                new_total[new_label] = new_total.get(new_label, 0.0) + seconds
 
-            rename_map = {}
-            for turn in dict.fromkeys(t.speaker for t in turns):
-                old = majority(turn)
-                if old:
-                    rename_map[turn] = old
+            names: Dict[str, str] = {}
+            for (old_label, new_label), seconds in durations.items():
+                existing = recording.speaker_names.get(old_label, "")
+                if not existing:
+                    continue
+                if old_total.get(old_label, 0.0) <= 0.0 or new_total.get(new_label, 0.0) <= 0.0:
+                    continue
+                share_old = seconds / old_total[old_label]
+                share_new = seconds / new_total[new_label]
+                if share_old >= NAME_PURITY and share_new >= NAME_PURITY:
+                    names[new_label] = existing
 
             for seg in recording.segments:
                 new_label = new_labels[id(seg)]
                 if new_label != seg.speaker:
                     self._moved_segments += 1
                 seg.speaker = new_label
-            # keep manual names aligned with the relabelled clusters
-            names = {}
-            for new_label, old_label in rename_map.items():
-                existing = recording.speaker_names.get(old_label, "")
-                if existing:
-                    names[new_label] = existing
-            manual = {
-                label: value for label, value in recording.speaker_names.items()
-                if label not in rename_map.values()
-            }
-            recording.speaker_names = {**names, **{
-                label: value for label, value in manual.items()
-                if label in {s.speaker for s in recording.segments}
-            }}
+            previous_names = dict(recording.speaker_names)
+            recording.speaker_names = names
+            self._dropped_names = sorted(
+                {value for value in previous_names.values()}
+                - {value for value in names.values()}
+                - {""}
+            )
 
             # voiceprints: re-match the fresh clusters against the library
             if event.is_set():
@@ -818,12 +825,26 @@ class Processor:
                         if label in {s.speaker for s in recording.segments}
                     }
                 # tidy the raw cluster ids (0, 71, 296...) into sequential
-                # SPEAKER_00.. by first appearance; keep manual names aligned
+                # SPEAKER_00.. by first appearance; every label-keyed structure
+                # must follow, otherwise stale keys survive in the record and in
+                # the saved embeddings (the full pipeline remaps them too)
                 label_map = align.renumber_speakers(recording.segments)
                 if label_map:
                     recording.speaker_names = {
                         label_map.get(label, label): value
                         for label, value in recording.speaker_names.items()
+                    }
+                    recording.speaker_match = {
+                        label_map.get(label, label): value
+                        for label, value in recording.speaker_match.items()
+                    }
+                    clusters = {
+                        label_map.get(label, label): vector
+                        for label, vector in clusters.items()
+                    }
+                    per_segment = {
+                        label_map.get(label, label): rows
+                        for label, rows in per_segment.items()
                     }
                 speaker_embed.save_record_embeddings(
                     config.embedding_dir, recording.id, clusters, per_segment
@@ -865,6 +886,17 @@ class Processor:
                 f" · перенесено {self._moved_segments} "
                 + _plural_ru(self._moved_segments, "реплика", "реплики", "реплик")
             )
+            if self._dropped_names:
+                shown = ", ".join(f"«{name}»" for name in self._dropped_names[:3])
+                if len(self._dropped_names) > 3:
+                    shown += f" и ещё {len(self._dropped_names) - 3}"
+                recording.speakers_diff += (
+                    f" · сброшены имена: {shown} — разбивка изменилась, назначьте заново"
+                )
+                self.library.log(
+                    "speakers-only dropped names (разбивка изменилась): "
+                    + ", ".join(self._dropped_names)
+                )
             self.library.save(recording)
             self.library.log(
                 f"done speakers-only {recording.filename}: "
