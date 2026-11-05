@@ -12,7 +12,13 @@ import math
 import numpy as np
 import pytest
 
-from nestor.speaker_merge import cosine, merge_similar_clusters, normalise
+from nestor.speaker_merge import (
+    cosine,
+    group_cohesion,
+    merge_similar_clusters,
+    normalise,
+    split_inhomogeneous_clusters,
+)
 
 
 def unit(angle_deg: float, size: int = 16):
@@ -247,3 +253,114 @@ def test_many_clusters_scale_without_blowing_up():
     assert set(mapping) == set(vectors)
     assert len(groups) <= 30
     assert sum(len(group) for group in groups) == len(vectors)
+
+
+# ------------------------------------------------------- strict cohesion (B)
+def test_min_coh_blocks_a_merge_that_is_not_homogeneous():
+    """``min_coh`` refuses the merge when the combined group is a mix of voices."""
+    vectors = {"SPEAKER_00": unit(0), "SPEAKER_01": unit(10)}  # cosine ~0.985
+    # SPEAKER_00 is a wide spread of one stage room, SPEAKER_01 is tight
+    segments = {
+        "SPEAKER_00": [unit(a) for a in (-80, -40, 0, 40, 80)],
+        "SPEAKER_01": [unit(10), unit(10)],
+    }
+    weights = {label: float(len(rows)) for label, rows in segments.items()}
+
+    merged, groups = merge_similar_clusters(
+        vectors, 0.9, weights=weights, segment_vectors=segments
+    )
+    assert len(groups) == 1  # without the guard the pair folds together
+
+    guarded, groups = merge_similar_clusters(
+        vectors, 0.9, weights=weights, segment_vectors=segments, min_coh=0.8
+    )
+    assert len(groups) == 2
+    assert guarded["SPEAKER_00"] == "SPEAKER_00"
+    assert guarded["SPEAKER_01"] == "SPEAKER_01"
+
+
+def test_min_coh_allows_a_genuinely_homogeneous_merge():
+    """A tight cluster merging into an equally tight neighbour still passes."""
+    vectors = {"SPEAKER_00": unit(0), "SPEAKER_01": unit(8)}
+    segments = {
+        "SPEAKER_00": [unit(0), unit(2), unit(-2)],
+        "SPEAKER_01": [unit(8), unit(10), unit(6)],
+    }
+    weights = {label: float(len(rows)) for label, rows in segments.items()}
+    merged, groups = merge_similar_clusters(
+        vectors, 0.9, weights=weights, segment_vectors=segments, min_coh=0.9
+    )
+    assert len(groups) == 1
+
+
+# ------------------------------------------------------- auto-split of blobs (D)
+class _Seg:
+    """Minimal stand-in for :class:`nestor.library.Segment`."""
+
+    def __init__(self, speaker: str, start: float, end: float):
+        self.speaker = speaker
+        self.start = start
+        self.end = end
+
+
+def _cluster_of(label: str, angles, spacing: float = 1.0):
+    """Build ``(segments, clusters, per_segment)`` for one labelled cluster."""
+    rows = [unit(a) for a in angles]
+    segments = [_Seg(label, i * spacing, i * spacing + 1.0) for i in range(len(rows))]
+    vector = normalise(np.mean([np.asarray(r, dtype=np.float64) for r in rows], axis=0))
+    return segments, {label: vector}, {label: rows}
+
+
+def test_split_inhomogeneous_cluster_cuts_two_voices_apart():
+    angles = [-1.0, 1.0, 0.0] * 20 + [70.0, 72.0, 68.0] * 20
+    segments, clusters, per_segment = _cluster_of("SPEAKER_00", angles)
+    lines = []
+
+    new_clusters, new_per_segment = split_inhomogeneous_clusters(
+        segments, clusters, per_segment, report=lines.append, min_segments=50
+    )
+
+    assert len(new_clusters) == 2
+    assert "SPEAKER_00" in new_clusters
+    assert "SPEAKER_00__SPLIT1" in new_clusters
+    used = {seg.speaker for seg in segments}
+    assert used == {"SPEAKER_00", "SPEAKER_00__SPLIT1"}
+    assert sum(len(new_per_segment[label]) for label in new_clusters) == len(angles)
+    assert any("into 2" in line for line in lines)
+
+
+def test_split_inhomogeneous_cluster_leaves_a_uniform_voice_alone():
+    angles = [a * 1.0 for a in range(0, 60)]  # one long continuum, ~0.9 coherence
+    segments, clusters, per_segment = _cluster_of("SPEAKER_00", angles)
+    lines = []
+
+    new_clusters, _ = split_inhomogeneous_clusters(
+        segments, clusters, per_segment, report=lines.append, min_segments=50
+    )
+
+    assert list(new_clusters) == ["SPEAKER_00"]
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00"}
+    assert any("not cut" in line for line in lines)
+
+
+def test_split_skips_clusters_below_min_segments():
+    angles = [0.0, 1.0, 70.0, 71.0]  # would look like two voices, but is tiny
+    segments, clusters, per_segment = _cluster_of("SPEAKER_00", angles)
+    lines = []
+
+    new_clusters, _ = split_inhomogeneous_clusters(
+        segments, clusters, per_segment, report=lines.append, min_segments=50
+    )
+
+    assert list(new_clusters) == ["SPEAKER_00"]
+    assert lines == []  # too small to even check
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00"}
+
+
+def test_group_cohesion_edge_cases():
+    assert group_cohesion([], 16) == 1.0
+    assert group_cohesion([unit(0)], 16) == 1.0
+    assert group_cohesion([unit(0), unit(0)], 16) == pytest.approx(1.0)
+    assert group_cohesion([unit(0), unit(90)], 16) == pytest.approx(
+        cosine(unit(0), normalise(np.asarray(unit(0)) + np.asarray(unit(90)))), abs=1e-6
+    )

@@ -338,7 +338,21 @@ def process_file(
                     threshold=config.merge_threshold,
                     min_weight=config.merge_min_weight,
                     segment_floor=config.merge_segment_floor,
+                    min_coh=config.merge_min_coh,
                     report=report,
+                )
+            # Auto-split: the merge pass above can chain a continuum of voices
+            # into one huge cluster. Re-check the (now merged) clusters and cut
+            # back the ones that are really two voices - the barrier is high, so
+            # a normal speaker is never carved up (see speaker_merge).
+            if config.merge_split_min_segments > 0:
+                clusters, per_segment = speaker_merge.split_inhomogeneous_clusters(
+                    segments,
+                    clusters,
+                    per_segment,
+                    report=report,
+                    min_segments=config.merge_split_min_segments,
+                    min_segment_sec=config.vp_min_segment_sec,
                 )
             # tidy the raw cluster ids (0, 71, 296...) into sequential
             # SPEAKER_00.. by first appearance, before names/matching/embeddings

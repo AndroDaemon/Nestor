@@ -69,6 +69,15 @@ class Config:
     # close (their mean cosine to the target's centroid). Without it a real
     # meeting can collapse into a single speaker.
     merge_segment_floor: float = 0.35
+    # Strict-cohesion guard (opt-in, 0.0 = off): refuse any merge whose group
+    # ends up internally inhomogeneous (mean cosine of its own segments to the
+    # merged centroid below this). Trades a giant chained "speaker" for more,
+    # smaller ones - off by default because it can over-split one voice.
+    merge_min_coh: float = 0.0
+    # Auto-split: before average linkage folds a big cluster together, try to
+    # cut it in two when it is clearly two voices (see speaker_merge). Clusters
+    # with fewer than this many segment embeddings are left alone; 0 = off.
+    merge_split_min_segments: int = 50
 
     # Glossary: rewrite recognised terms ("докер", "днс") to canonical form
     # ("Docker", "DNS"). Fully offline, deterministic, no speed impact.

@@ -816,6 +816,7 @@ class Processor:
                         threshold=config.merge_threshold,
                         min_weight=config.merge_min_weight,
                         segment_floor=config.merge_segment_floor,
+                        min_coh=config.merge_min_coh,
                         report=lambda line: self.library.log(line.strip()),
                     )
                     # the merged labels must also update the manual names
@@ -824,6 +825,18 @@ class Processor:
                         for label, value in recording.speaker_names.items()
                         if label in {s.speaker for s in recording.segments}
                     }
+                # Auto-split: undoes a chained mega-cluster when it is really two
+                # voices (same high barrier as the full pipeline; see speaker_merge)
+                if config.merge_split_min_segments > 0:
+                    from .. import speaker_merge as _speaker_merge_split
+                    clusters, per_segment = _speaker_merge_split.split_inhomogeneous_clusters(
+                        recording.segments,
+                        clusters,
+                        per_segment,
+                        report=lambda line: self.library.log(line.strip()),
+                        min_segments=config.merge_split_min_segments,
+                        min_segment_sec=config.vp_min_segment_sec,
+                    )
                 # tidy the raw cluster ids (0, 71, 296...) into sequential
                 # SPEAKER_00.. by first appearance; every label-keyed structure
                 # must follow, otherwise stale keys survive in the record and in
@@ -930,6 +943,7 @@ class ProcessOptions(BaseModel):
     merge_threshold: Optional[float] = None
     merge_min_weight: Optional[float] = None
     merge_segment_floor: Optional[float] = None
+    merge_min_coh: Optional[float] = None
     audio_enhance: Optional[bool] = None
     diar_threshold: Optional[float] = None
     diar_min_duration_on: Optional[float] = None
@@ -1004,6 +1018,8 @@ def job_config(
         config.merge_min_weight = float(chosen["merge_min_weight"])
     if chosen.get("merge_segment_floor") is not None:
         config.merge_segment_floor = float(chosen["merge_segment_floor"])
+    if chosen.get("merge_min_coh") is not None:
+        config.merge_min_coh = float(chosen["merge_min_coh"])
     if chosen.get("audio_enhance") is not None:
         config.audio_enhance = as_bool(chosen.get("audio_enhance"), True)
     if chosen.get("diar_threshold") is not None:
@@ -1109,6 +1125,7 @@ def _settings_snapshot(config: Config) -> Dict[str, object]:
         "match_voiceprints": bool(config.match_voiceprints),
         "merge_speakers": bool(config.merge_speakers),
         "merge_threshold": config.merge_threshold,
+        "merge_min_coh": config.merge_min_coh,
         "chunk_seconds": config.chunk_seconds,
     }
 
@@ -1406,6 +1423,7 @@ def create_app(
             "merge_threshold": settings.get("merge_threshold"),
             "merge_min_weight": settings.get("merge_min_weight"),
             "merge_segment_floor": settings.get("merge_segment_floor"),
+            "merge_min_coh": settings.get("merge_min_coh", 0.0),
             "audio_enhance": settings.get("audio_enhance", True),
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
@@ -1485,6 +1503,7 @@ def create_app(
             "merge_threshold": settings.get("merge_threshold"),
             "merge_min_weight": settings.get("merge_min_weight"),
             "merge_segment_floor": settings.get("merge_segment_floor"),
+            "merge_min_coh": settings.get("merge_min_coh", 0.0),
             "audio_enhance": settings.get("audio_enhance", True),
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),

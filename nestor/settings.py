@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SETTINGS_FILE = "settings.json"
 
 # key -> (kind, constraint); anything not listed here is ignored on update.
@@ -40,6 +40,9 @@ SCHEMA: Dict[str, Tuple[str, object]] = {
     "merge_min_weight": ("float", (0.0, 30.0)),
     # segment-agreement floor for the merge pass (0 = old lenient behaviour)
     "merge_segment_floor": ("float", (0.0, 1.0)),
+    # strict-cohesion guard for the merge pass (opt-in, 0 = off): refuse merges
+    # that would leave the group internally inhomogeneous
+    "merge_min_coh": ("float", (0.0, 1.0)),
     # audio enhancement before ASR (highpass + level normalization)
     "audio_enhance": ("bool", None),
     # diarization clustering (sherpa distance threshold; 0.5 = sherpa default)
@@ -76,6 +79,7 @@ DEFAULTS: Dict[str, object] = {
     "merge_threshold": 0.45,
     "merge_min_weight": 1.5,
     "merge_segment_floor": 0.35,
+    "merge_min_coh": 0.0,
     "audio_enhance": True,
     "diar_threshold": 0.5,
     "diar_min_duration_on": 0.5,
@@ -161,10 +165,16 @@ class SettingsStore:
         long meetings) and the merge pass gained a segment-agreement floor;
         files written by older builds carry the old values explicitly, so they
         are reset to the new defaults here.
+
+        2 -> 3: the merge pass gained an opt-in strict-cohesion guard
+        (``merge_min_coh``); older files simply take the default (off), and a
+        large-cluster auto-split was added that is always on.
         """
         if from_version < 2:
             self._data["diar_threshold"] = DEFAULTS["diar_threshold"]
             self._data["merge_segment_floor"] = DEFAULTS["merge_segment_floor"]
+        if from_version < 3:
+            self._data["merge_min_coh"] = DEFAULTS["merge_min_coh"]
         with self._lock:
             self._write()
 

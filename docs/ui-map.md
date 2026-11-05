@@ -157,6 +157,8 @@ hover, фокус и прокрутка рейла.
 | — подклеить | `.tools button` (2-я) | «подклеить» → `mergeIntoPrevious()` |
 | — разделить | `.tools button` (3-я) | «разделить» → `splitSegment()`: рез по ближайшей границе слова (`snapCutToWord()`), время — по доле текста; Ctrl+Enter в тексте — то же без мыши; кнопки панели гасят `mousedown`, чтобы не терять каретку |
 | — к спикеру… | `.tools button` (4-я) | «к спикеру…» → `showReassignPopup()`: перенос реплики к другому спикеру / новому |
+| Панель выделения | `#sel-bar` (`.sel-bar`) | видна при непустом `state.segSel`: «Выделено: N реплик» + кнопки «Выделить в нового спикера», «Склеить выделенное со спикером…», «Выбрать все реплики…», «Снять выделение»; `renderSelBar()` |
+| Выделенная реплика | `.seg.selected` | клик — одиночное выделение, Ctrl+клик — toggle, Shift+клик — диапазон от `state.segSelAnchor`; Esc — снять; `selectSegment()`/`clearSegmentSelection()`/`repaintSelection()` |
 | Пустое состояние | `#segments .empty` | «В записи нет речи» / «У этого спикера нет реплик» (при фильтре) |
 
 Цвета спикеров: классы `.sp-0`…`.sp-11` (12 цветов, дальше циклически) и
@@ -209,6 +211,7 @@ hover, фокус и прокрутка рейла.
 | Ctrl+F | фокус в поиск + выделение |
 | Ctrl+E | открыть меню «Выгрузить» |
 | Ctrl+Z | отмена правки реплик (когда фокус не в поле ввода) |
+| Ctrl+Shift+Z / Ctrl+Y | вернуть отменённое (`redo()`) |
 | Пробел | play/pause (когда фокус не в поле ввода) |
 | ← / → | −5 с / +5 с |
 | J / K | следующая / предыдущая реплика (с учётом фильтра по спикеру), курсор переставляется на неё |
@@ -236,6 +239,7 @@ hover, фокус и прокрутка рейла.
 | `soloTick()` / `soloSync()` / `soloSeekIntoView()` | соло-проигрывание при фильтре: перескок через чужие реплики и паузы (только вперёд), пауза после последней, запуск ▶ сразу с видимой реплики; таймер 50 мс живёт только во время игры |
 | `setSaveState(mode)` | `#save-state`: «сохраняю…» / «сохранено» / «не сохраняется — повторю» |
 | `undo()` | восстановление `{segments, names, match, savedVoices}` из `snapshot()` + `syncSpeakersFromSegments()` |
+| `redo()` | обратный к `undo()`: переносит текущее состояние в `undo`, восстанавливает из `state.redo` |
 | `renderBookmarks()` | `#bm-list` |
 | `renderExports()` | `#exports` |
 | `drawWave()` | `#wave`: волна, закладки, плейхед; спикеры — цветные «линейки» внизу (полоса 8px `+55` и сплошная кромка 3px цветом спикера) |
@@ -274,8 +278,10 @@ threadpool (`run_in_threadpool`), event loop свободен.
 
 `state` — всё состояние UI: `recordings`, `current`, `speakers`, `names`,
 `match`, `savedVoices`, `dirty`, `follow`, `peaks`, `pending`, `caret`, `undo`,
-`view` (окно зума таймлайна), `saveTimer`, `searchCursor`, `searchTimer`,
-`filterSpeaker`, `playUntil`, `colorIndex`, `nextColor`.
+`redo` (стек возврата отменённого), `segSel` (множество id выделенных реплик) и
+`segSelAnchor` (якорь диапазона Shift+клик), `view` (окно зума таймлайна),
+`saveTimer`, `searchCursor`, `searchTimer`, `filterSpeaker`, `playUntil`,
+`colorIndex`, `nextColor`.
 
 Дубли имён спикеров: чип с именем, которое встречается ещё у кого-то,
 получает класс `.dup` (жёлтая кромка + точка) и тултип «можно склеить».

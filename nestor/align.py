@@ -212,12 +212,15 @@ def renumber_speakers(segments: Sequence[Segment]) -> Dict[str, str]:
     """Renumber SPEAKER_NN labels 00, 01, 02... by first appearance, in place.
 
     The diarizer's raw cluster ids are not sequential (0, 71, 296...), which
-    confuses users. Returns the old->new mapping; other structures keyed by
-    labels (speaker_names, speaker_match) must be remapped by the caller.
+    confuses users. Internal labels produced by the auto-split carry a
+    ``__SPLIT<k>`` suffix (``SPEAKER_05__SPLIT1``) and are treated the same way.
+    Returns the old->new mapping; other structures keyed by labels
+    (speaker_names, speaker_match) must be remapped by the caller.
     """
     mapping: Dict[str, str] = {}
     for index, label in enumerate(speaker_order(segments)):
-        if label.startswith("SPEAKER_") and label[8:].isdigit():
+        base = label.split("__SPLIT", 1)[0]
+        if base.startswith("SPEAKER_") and base[8:].isdigit():
             mapping[label] = f"SPEAKER_{index:02d}"
     if not mapping:
         return mapping

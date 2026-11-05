@@ -709,6 +709,19 @@
   .search-count { position: absolute; right: 8px; font-size: 11.5px; color: var(--muted); background: var(--panel); padding: 1px 6px; border-radius: 99px; border: 1px solid var(--line); }
   .seg.hit { background: rgba(255, 52, 149, .10); border-color: var(--accent); }
   .seg .txt mark { background: rgba(255, 52, 149, .30); color: inherit; border-radius: 3px; padding: 0 1px; }
+  /* выделение реплик (Shift/Ctrl+клик): действия — в панели над списком */
+  .seg.selected { background: rgba(9, 105, 218, .14); border-color: var(--accent); }
+  .seg.selected:hover { background: rgba(9, 105, 218, .20); }
+  /* панель действий над выделенными репликами */
+  .sel-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+  .sel-bar .sel-count { color: var(--text); }
+  .sel-bar .sel-hint { color: var(--muted); opacity: .8; }
+  .sel-bar button {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 7px; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12px;
+  }
+  .sel-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .sel-bar button.primary { border-color: var(--accent); color: var(--accent); }
   /* фильтр по спикеру: строка над списком реплик */
   .filter-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12.5px; color: var(--muted); }
   .filter-bar .filter-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
@@ -868,6 +881,11 @@
               </div>
               <div class="hint">На длинных записях один человек часто распадается на несколько ярлыков — «обычно» их склеивает. «Осторожно» склеивает только явно похожие голоса: выберите его, если Nestor склеил разных людей.</div>
             </label>
+            <label class="field wide check-row" id="min-coh-field">
+              <input type="checkbox" id="min-coh" style="width:auto">
+              <span>Строгая склейка по однородности</span>
+              <span class="hint">Дополнительная защита: голоса склеиваются только если получившаяся группа звучит однородно. Может дробить одного человека на несколько спикеров — включайте, если предпочитаете больше спикеров вместо крупных блоков. По умолчанию выключено.</span>
+            </label>
             <div class="group-label">Термины</div>
             <label class="field wide check-row">
               <input type="checkbox" id="glossary" style="width:auto">
@@ -922,6 +940,7 @@
           <button class="chips-toggle hidden" id="chips-toggle"></button>
         </div>
         <div class="filter-bar hidden" id="filter-bar"></div>
+        <div class="sel-bar hidden" id="sel-bar"></div>
         <div id="segments"></div>
       </div>
     </section>
@@ -1045,6 +1064,9 @@ const state = {
   ctxRec: null,        // recording the rail context menu acts on
   caret: {},
   undo: [],
+  redo: [],            // redo stack (Ctrl+Shift+Z / Ctrl+Y), cleared by a new edit
+  segSel: new Set(),   // ids of transcript segments the user selected
+  segSelAnchor: null,  // last clicked segment: the anchor for shift+click ranges
   colorIndex: {},      // speaker id -> stable colour slot (assigned on first sight)
   nextColor: 0,        // next free colour slot
   chipsExpanded: false, // speaker chips list expanded (many speakers)
@@ -1991,6 +2013,9 @@ async function openRecording(id) {
   // stale snapshot applied here would overwrite THIS record with the other
   // one's segments and then save them (silent data loss)
   state.undo = [];
+  state.redo = [];
+  state.segSel.clear();
+  state.segSelAnchor = null;
   state.caret = {};
   if (state.soloTimer) { clearInterval(state.soloTimer); state.soloTimer = null; }
   $('search').value = '';
@@ -2724,6 +2749,7 @@ function renderSegments() {
     box.innerHTML = '<div class="empty">В записи нет речи</div>';
     updateSearchCount(0);
     renderFilterBar();
+    renderSelBar();
     return;
   }
   const query = $('search').value.trim().toLowerCase();
@@ -2734,7 +2760,7 @@ function renderSegments() {
     if (query && !seg.text.toLowerCase().includes(query)) continue;
     if (query) matches++;
     const row = document.createElement('div');
-    row.className = 'seg' + (query ? ' hit' : '');
+    row.className = 'seg' + (query ? ' hit' : '') + (state.segSel.has(seg.id) ? ' selected' : '');
     row.dataset.id = seg.id;
 
     const time = document.createElement('div');
@@ -2834,7 +2860,18 @@ function renderSegments() {
     body.appendChild(tools);
     row.appendChild(time);
     row.appendChild(body);
-    row.onclick = (e) => { if (e.target === text) return; seek(seg.start); };
+    row.onclick = (e) => {
+      if (e.target === text) return;
+      // Shift/Ctrl+click select the segment instead of seeking; a plain click
+      // seeks (the old behaviour) and clears any selection.
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        selectSegment(seg, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+        return;
+      }
+      if (state.segSel.size) { clearSegmentSelection(); return; }
+      seek(seg.start);
+    };
     row.ondblclick = (e) => { if (e.target === text) return; playSegment(seg); };
     box.appendChild(row);
   }
@@ -2847,12 +2884,233 @@ function renderSegments() {
   highlightActiveSegment();
   updateSearchCount(matches);
   renderFilterBar();
+  renderSelBar();
+}
+
+/* --------------------------------------------------------------- selection */
+/* Segments can be selected like rows in the records table: a plain click seeks
+   and clears, Ctrl+click toggles one, Shift+click extends from the anchor. The
+   selection drives the two bulk actions (new speaker / merge into a speaker). */
+function orderedSegmentIds() {
+  const ids = [];
+  for (const seg of state.current.segments) {
+    if (!state.filterSpeaker || seg.speaker === state.filterSpeaker) ids.push(seg.id);
+  }
+  return ids;
+}
+function selectedSegments() {
+  return state.current.segments.filter(s => state.segSel.has(s.id));
+}
+function selectSegment(seg, { shift = false, ctrl = false } = {}) {
+  if (shift && state.segSelAnchor != null) {
+    const ids = orderedSegmentIds();
+    const a = ids.indexOf(state.segSelAnchor);
+    const b = ids.indexOf(seg.id);
+    if (a >= 0 && b >= 0) {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      if (!ctrl) state.segSel.clear();
+      for (let i = lo; i <= hi; i++) state.segSel.add(ids[i]);
+      state.segSelAnchor = seg.id;
+      repaintSelection();
+      return;
+    }
+  }
+  if (ctrl) {
+    if (state.segSel.has(seg.id)) state.segSel.delete(seg.id);
+    else state.segSel.add(seg.id);
+  } else {
+    state.segSel.clear();
+    state.segSel.add(seg.id);
+  }
+  state.segSelAnchor = seg.id;
+  repaintSelection();
+}
+function clearSegmentSelection() {
+  state.segSel.clear();
+  state.segSelAnchor = null;
+  repaintSelection();
+}
+/* Update the .selected class in place (no full re-render: keeps the caret). */
+function repaintSelection() {
+  for (const row of document.querySelectorAll('#segments .seg')) {
+    row.classList.toggle('selected', state.segSel.has(row.dataset.id));
+  }
+  renderSelBar();
+}
+/* The action bar above the transcript: only the selected count plus the two
+   bulk actions, mirroring the records table's bulk panel. */
+function renderSelBar() {
+  const bar = $('sel-bar');
+  if (!bar) return;
+  const n = state.segSel.size;
+  if (!n || !state.current) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+  const count = document.createElement('span');
+  count.className = 'sel-count';
+  count.textContent = 'Выделено: ' + n + ' ' + plural(n, 'реплика', 'реплики', 'реплик');
+  bar.appendChild(count);
+  const toNew = document.createElement('button');
+  toNew.type = 'button';
+  toNew.className = 'primary';
+  toNew.textContent = 'Выделить в нового спикера';
+  toNew.dataset.tip = 'Выделенные реплики станут отдельным спикером; остальные не изменятся';
+  toNew.onclick = () => selectedToNewSpeaker();
+  bar.appendChild(toNew);
+  const toSpk = document.createElement('button');
+  toSpk.type = 'button';
+  toSpk.textContent = 'Склеить выделенное со спикером…';
+  toSpk.dataset.tip = 'Перенести выделенные реплики к выбранному спикеру';
+  toSpk.onclick = (e) => showMergeSelectionPopup(e.currentTarget);
+  bar.appendChild(toSpk);
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.textContent = 'Выбрать все реплики…';
+  all.dataset.tip = 'Выделить все реплики одного спикера';
+  all.onclick = (e) => showSelectAllSpeakersPopup(e.currentTarget);
+  bar.appendChild(all);
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.textContent = 'Снять выделение';
+  clear.onclick = () => clearSegmentSelection();
+  bar.appendChild(clear);
+  const esc = document.createElement('span');
+  esc.className = 'sel-hint';
+  esc.textContent = 'Esc — снять · Shift/Ctrl+клик — добавить';
+  bar.appendChild(esc);
+}
+
+/* "Выделить в нового спикера": the selected segments get a fresh label; every
+   other segment (and its name) is untouched. */
+function selectedToNewSpeaker(label, name) {
+  const segs = selectedSegments();
+  if (!segs.length) return toast('Сначала выделите реплики в списке');
+  snapshot();
+  if (!label) {
+    let n = 1;
+    while (state.speakers.includes('SPEAKER_NEW' + n)) n++;
+    label = 'SPEAKER_NEW' + n;
+  }
+  state.names[label] = name != null ? name : '';
+  for (const seg of segs) seg.speaker = label;
+  state.segSel.clear();
+  state.segSelAnchor = null;
+  syncSpeakersFromSegments();
+  markDirty();
+  toast(`Выделенные реплики — у нового спикера «${speakerName(label)}». Назовите его на чипе.`);
+  if (name) revealChip(label); else focusChipName(label);
+  renderChips(); renderSegments(); renderBookmarks(); drawWave();
+}
+
+/* "Склеить выделенное со спикером…": pick a target speaker for the selected
+   segments; a source cluster that empties out disappears (with its name). */
+function showMergeSelectionPopup(anchor) {
+  const existing = document.getElementById('merge-pop');
+  if (existing) existing.remove();
+  const segs = selectedSegments();
+  if (!segs.length) return toast('Сначала выделите реплики в списке');
+  const sources = new Set(segs.map(s => s.speaker));
+  const pop = document.createElement('div');
+  pop.id = 'merge-pop';
+  const title = document.createElement('div');
+  title.className = 'merge-title';
+  title.textContent = 'В какого спикера';
+  pop.appendChild(title);
+  for (const target of state.speakers) {
+    if (sources.size === 1 && sources.has(target)) continue;  // pointless self-merge
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'merge-row';
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    sw.style.background = speakerColor(target);
+    const label = document.createElement('span');
+    label.textContent = speakerName(target) + (target !== speakerName(target) ? ` · ${target}` : '');
+    row.appendChild(sw);
+    row.appendChild(label);
+    row.onclick = () => { pop.remove(); mergeSelectionInto(target); };
+    pop.appendChild(row);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'merge-cancel';
+  cancel.textContent = 'Отмена';
+  cancel.onclick = () => pop.remove();
+  pop.appendChild(cancel);
+  document.body.appendChild(pop);
+  placePopup(pop, anchor);
+}
+
+function mergeSelectionInto(target) {
+  const segs = selectedSegments();
+  if (!segs.length) return;
+  snapshot();
+  for (const seg of segs) seg.speaker = target;
+  if (!state.names[target]) state.names[target] = '';
+  state.segSel.clear();
+  state.segSelAnchor = null;
+  syncSpeakersFromSegments();   // drops any source label that lost its last segment
+  markDirty();
+  toast(`Выделенные реплики перенесены: ${speakerName(target)}`);
+  renderChips(); renderSegments(); renderBookmarks(); drawWave();
+}
+
+/* "Выбрать все реплики SPEAKER_NN": a small chooser mirroring the reassign popup. */
+function showSelectAllSpeakersPopup(anchor) {
+  const existing = document.getElementById('reassign-pop');
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'reassign-pop';
+  const title = document.createElement('div');
+  title.className = 'merge-title';
+  title.textContent = 'Все реплики спикера';
+  pop.appendChild(title);
+  for (const id of state.speakers) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'merge-row';
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    sw.style.background = speakerColor(id);
+    const label = document.createElement('span');
+    const total = state.current.segments.filter(s => s.speaker === id).length;
+    label.textContent = speakerName(id) + ` · ${total}`;
+    row.appendChild(sw);
+    row.appendChild(label);
+    row.onclick = () => { pop.remove(); selectAllSpeaker(id); };
+    pop.appendChild(row);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'merge-cancel';
+  cancel.textContent = 'Отмена';
+  cancel.onclick = () => pop.remove();
+  pop.appendChild(cancel);
+  document.body.appendChild(pop);
+  placePopup(pop, anchor);
+}
+
+function selectAllSpeaker(id) {
+  state.segSel.clear();
+  let anchor = null;
+  for (const seg of state.current.segments) {
+    if (seg.speaker === id) {
+      state.segSel.add(seg.id);
+      if (anchor == null) anchor = seg.id;
+    }
+  }
+  state.segSelAnchor = anchor;
+  repaintSelection();
+  if (!state.segSel.size) toast('У этого спикера нет реплик');
 }
 
 /* Speaker filter: show only the segments of one speaker. Toggled by clicking
    the colour swatch on a chip; the bar above the transcript clears it. */
 function setSpeakerFilter(id) {
   state.filterSpeaker = (id != null && id === state.filterSpeaker) ? null : (id || null);
+  // the selection only makes sense over the visible rows
+  state.segSel.clear();
+  state.segSelAnchor = null;
   renderChips();
   renderSegments();
   soloSync();
@@ -3156,6 +3414,7 @@ function pushUndo(snap) {
   if (!snap) return;
   state.undo.push(snap);
   if (state.undo.length > 40) state.undo.shift();
+  state.redo = [];   // a new edit invalidates the redo history
 }
 function snapshot() {
   pushUndo(snapshotString());
@@ -3176,18 +3435,40 @@ function commitEditSnapshot() {
 function dropEditSnapshot() {
   state.editSnapshot = null;
 }
-function undo() {
-  if (!state.undo.length) return toast('Нечего отменять');
-  const snap = JSON.parse(state.undo.pop());
+// Apply a saved snapshot to the editor (shared by undo and redo).
+function restoreSnapshot(snap) {
   state.current.segments = snap.segments;
   // restore the naming state too: a reassignment prunes the name of a label
   // that lost its last segment, and undo must bring that name back
   state.names = snap.names || {};
   state.match = snap.match || {};
   state.savedVoices = snap.savedVoices || state.savedVoices || {};
+  pruneSelection();
   syncSpeakersFromSegments();   // the restored segments may drop or re-add speakers
   markDirty();
   renderChips(); renderSegments(); renderBookmarks(); drawWave();
+}
+/* Drop ids from the selection that no longer exist after a structural edit. */
+function pruneSelection() {
+  if (!state.current) { state.segSel.clear(); state.segSelAnchor = null; return; }
+  const live = new Set(state.current.segments.map(s => s.id));
+  for (const id of [...state.segSel]) if (!live.has(id)) state.segSel.delete(id);
+  if (state.segSelAnchor != null && !live.has(state.segSelAnchor)) state.segSelAnchor = null;
+}
+function undo() {
+  if (!state.undo.length) return toast('Нечего отменять');
+  const current = snapshotString();
+  const snap = JSON.parse(state.undo.pop());
+  // remember where we were so Ctrl+Shift+Z can walk back into this state
+  if (current) { state.redo.push(current); if (state.redo.length > 40) state.redo.shift(); }
+  restoreSnapshot(snap);
+}
+function redo() {
+  if (!state.redo.length) return toast('Нечего повторять');
+  const current = snapshotString();
+  const snap = JSON.parse(state.redo.pop());
+  if (current) { state.undo.push(current); if (state.undo.length > 40) state.undo.shift(); }
+  restoreSnapshot(snap);
 }
 function mergeIntoPrevious(seg) {
   const list = state.current.segments;
@@ -3200,6 +3481,7 @@ function mergeIntoPrevious(seg) {
   // the merged segment keeps the previous speaker and its colour
   if (seg.bookmark) prev.bookmark = true;
   list.splice(i, 1);
+  pruneSelection();
   markDirty(); renderSegments(); renderBookmarks(); drawWave();
 }
 function splitSegment(seg, textEl) {
@@ -3802,11 +4084,17 @@ const SETTINGS_CONTROLS = {
   'process-priority': { key: 'process_priority', kind: 'checked' },
   'pin-performance':  { key: 'pin_performance',  kind: 'checked' },
   'merge-pills':  { key: 'merge_min_weight',     kind: 'pill' },
+  'min-coh':      { key: 'merge_min_coh',        kind: 'min-coh' },
   'threads':      { key: 'threads',              kind: 'int-or-empty' },
   'glossary':     { key: 'glossary',             kind: 'checked' },
 };
 let serverSettings = {};          // last known server state (source of truth)
 let settingsSaveTimer = null;
+// value written for merge_min_coh when the "строгая склейка" toggle is on:
+// a merged group must stay at least this internally uniform (mean cosine of
+// its segments to the group centroid). 0.7 keeps clearly mixed blobs apart
+// while not carving a normal speaker (see speaker_merge / the diagnostics).
+const MIN_COH_ENABLED = 0.7;
 
 function settingsPayload() {
   // what the controls hold now, minus what the server already has
@@ -3822,6 +4110,7 @@ function settingsPayload() {
     let value;
     if (spec.kind === 'checked') value = el.checked;
     else if (spec.kind === 'pill') value = parseFloat(el.dataset.value);
+    else if (spec.kind === 'min-coh') value = el.checked ? MIN_COH_ENABLED : 0.0;
     else if (spec.kind === 'int-or-empty') {
       value = el.value === '' ? 0 : parseInt(el.value, 10) || 0;
     } else value = el.value;
@@ -3883,6 +4172,7 @@ function applySettingsToControls() {
       // "выключено" is the pill for the whole stage being off, not just 0.0
       setPillValue(el, serverSettings.merge_speakers === false ? 0 : v);
     },
+    merge_min_coh: (v) => { const el = $('min-coh'); if (el) el.checked = (v || 0) > 0; },
   };
   for (const [key, value] of Object.entries(serverSettings)) {
     if (map[key]) map[key](value);
@@ -4064,7 +4354,12 @@ function goHome() {
   setTopActions(false);
   state.current = null;
   state.undo = [];
+  state.redo = [];
+  state.segSel.clear();
+  state.segSelAnchor = null;
   state.caret = {};
+  const selBar = $('sel-bar');
+  if (selBar) { selBar.classList.add('hidden'); selBar.innerHTML = ''; }
   hideRenamePopup();
   loadRail();
 }
@@ -4628,7 +4923,13 @@ $('btn-help').onclick = () => {
      подсвечивает найденное в тексте, Enter переходит к следующему совпадению.</p>
   <p><b>Клавиши</b>: пробел — играть/пауза, ←/→ — назад/вперёд на 5 секунд,
      <b>J</b>/<b>K</b> — следующая/предыдущая реплика, <b>Enter</b> — проиграть
-     текущую реплику, Ctrl+F — поиск, Ctrl+Z — отменить правку, Ctrl+E — выгрузка.</p>
+     текущую реплику, Ctrl+F — поиск, Ctrl+Z — отменить правку, Ctrl+Shift+Z —
+     вернуть отменённое, Ctrl+E — выгрузка.</p>
+  <p><b>Ручная правка спикеров</b>: выделите реплики в списке (Ctrl+клик —
+     добавить, Shift+клик — диапазон, «Выбрать все реплики…» — все реплики одного
+     спикера) и выберите действие в панели над списком: «Выделить в нового
+     спикера» или «Склеить выделенное со спикером…». Это самый быстрый способ
+     разложить крупный блок на реальных людей; остальные записи не затрагиваются.</p>
   <p><b>Список записей</b> слева: поле сверху фильтрует записи по имени, кнопка
      ⚑ оставляет только записи в работе и с ошибкой. При наведении на запись
      видно её подробности (дата, длительность, спикеры, реплики, модель).</p>
@@ -5271,6 +5572,8 @@ $('btn-glossary').onclick = async () => {
 
 // the "Похожие голоса" pill is always on the home screen
 $('merge-pills').addEventListener('click', (e) => setPill('merge-pills', e.target));
+// the "строгая склейка" toggle saves like the other settings controls
+$('min-coh').addEventListener('change', scheduleSettingsSave);
 
 function setPill(groupId, button) {
   if (!button || !button.dataset.value) return;
@@ -5285,7 +5588,13 @@ document.addEventListener('keydown', (e) => {
     e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
   const mod = e.ctrlKey || e.metaKey;
 
-  if (mod && e.key.toLowerCase() === 'z' && !editing) { e.preventDefault(); undo(); return; }
+  if (mod && e.key.toLowerCase() === 'z' && !editing) {
+    e.preventDefault();
+    if (e.shiftKey) redo(); else undo();
+    return;
+  }
+  // Ctrl+Y is the other common redo chord (Windows)
+  if (mod && !editing && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   // Ctrl+F / Ctrl+E act on the open record; outside the editor they are no-ops
   if (mod && e.key.toLowerCase() === 'f') {
     e.preventDefault();
@@ -5302,6 +5611,7 @@ document.addEventListener('keydown', (e) => {
     $('modal').classList.add('hidden');
     $('export-menu').classList.add('hidden');
     hideJobMenu();
+    if (state.segSel.size) { clearSegmentSelection(); return; }
     if (state.filterSpeaker) setSpeakerFilter(null);
     return;
   }
