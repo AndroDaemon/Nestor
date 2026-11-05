@@ -848,7 +848,9 @@ class Processor:
             recording.stage = "done"
             recording.progress = 1.0
             recording.error = None
-            recording.model = config.model_name
+            # do NOT set recording.model here: the speakers-only pass does not
+            # run ASR, and the transcript may have been produced by a different
+            # model — keeping the previous value keeps the header honest
             recording.speakers_diff = (
                 f"{len(before_counts)} → {len(recording.speakers)}"
                 f" · перенесено {self._moved_segments} "
@@ -1006,13 +1008,17 @@ def _notify_done(title: str, body: str) -> None:
     after a recording finishes when the user has not turned notifications
     off in settings."""
     try:
+        # the values are dropped into single-quoted PowerShell literals: a
+        # filename with a quote would otherwise break out and inject commands
+        safe_title = str(title).replace("'", "''")
+        safe_body = str(body).replace("'", "''")
         script = (
             "[Windows.UI.Notifications.ToastNotificationManager,"
             " Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
             "$t=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
             "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
             "$x=$t.GetXml();"
-            f"$x=$x.Replace('placeholder1','{title}').Replace('placeholder2','{body}');"
+            f"$x=$x.Replace('placeholder1','{safe_title}').Replace('placeholder2','{safe_body}');"
             "$n=New-Object Windows.UI.Notifications.ToastNotification $t;"
             "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
             "'Nestor').Show($n)"
@@ -1034,11 +1040,11 @@ def _runtime_tuning(library: Library) -> tuple:
     pinning only ever does something on a hybrid CPU (see :mod:`nestor.cpuinfo`).
     """
     priority = False
-    pin = True
+    pin = False   # matches SettingsStore.DEFAULTS; pinning is opt-in
     try:
         data = SettingsStore(library.root).as_public()
         priority = bool(data.get("process_priority", False))
-        pin = bool(data.get("pin_performance", True))
+        pin = bool(data.get("pin_performance", False))
     except Exception:  # noqa: BLE001 - bad settings.json must not stop jobs
         pass
     return priority, pin
@@ -1337,11 +1343,31 @@ def create_app(
             # "add only": the file waits in the records rail until the user
             # starts processing from the context menu
             recording.status = "added"
+        # seed from the global settings (like the import path does), then let
+        # the form values override: otherwise an uploaded file silently ran
+        # with Config() defaults (glossary off, merge off) while an imported
+        # one honoured the user's settings — same file, two behaviours
+        settings = app.state.settings.as_public()
         recording.job_settings = {
             "model": DEFAULT_ASR_MODEL,
+            "diarize": bool(diarize),
             "backend": backend or "auto",
-            "num_speakers": num_speakers,
+            "num_speakers": num_speakers if num_speakers is not None
+            else (settings.get("num_speakers") or None),
             "match_voiceprints": match_voiceprints,
+            "vp_abs_threshold": settings.get("vp_abs_threshold"),
+            "vp_margin": settings.get("vp_margin"),
+            "vp_segment_agreement": settings.get("vp_segment_agreement"),
+            "merge_speakers": settings.get("merge_speakers", True),
+            "merge_threshold": settings.get("merge_threshold"),
+            "merge_min_weight": settings.get("merge_min_weight"),
+            "merge_segment_floor": settings.get("merge_segment_floor"),
+            "audio_enhance": settings.get("audio_enhance", True),
+            "diar_threshold": settings.get("diar_threshold"),
+            "diar_min_duration_on": settings.get("diar_min_duration_on"),
+            "diar_min_duration_off": settings.get("diar_min_duration_off"),
+            "rescue_holes": settings.get("rescue_holes", True),
+            "glossary": settings.get("glossary", False),
         }
         lib.save(recording)
         lib.log(f"upload {name} ({staging.stat().st_size} bytes)")
@@ -1510,17 +1536,20 @@ def create_app(
         recording = lib.load(record_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="Запись не найдена")
+        title = str(body.get("title") or "").strip() if "title" in body else None
+        notes = str(body.get("notes") or "").strip() if "notes" in body else None
+        # merge onto the freshest copy: the worker writes segments every ~0.4 s
+        # while a job runs, and saving our stale copy would drop its progress
+        fresh = lib.load(record_id) or recording
         if "title" in body:
-            title = str(body.get("title") or "").strip()
-            recording.title = title or None
+            fresh.title = title or None
         if "notes" in body:
-            notes = str(body.get("notes") or "").strip()
-            recording.notes = notes or None
-        lib.save(recording, create=False)
+            fresh.notes = notes or None
+        lib.save(fresh, create=False)
         return {
-            "id": recording.id,
-            "title": recording.title,
-            "notes": recording.notes,
+            "id": fresh.id,
+            "title": fresh.title,
+            "notes": fresh.notes,
         }
 
     @app.put("/api/recordings/{record_id}")
@@ -1535,15 +1564,41 @@ def create_app(
                 status_code=409,
                 detail="Идёт обработка — правки сейчас сохранить нельзя",
             )
-        payload = await request.json()
+        try:
+            payload = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        if not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=400, detail="Ожидался объект JSON с полями записи"
+            )
 
         old_composition = [(seg.id, seg.speaker) for seg in recording.segments]
         segments = payload.get("segments")
-        if isinstance(segments, list):
-            recording.segments = [Segment.from_dict(item) for item in segments]
+        if segments is not None:
+            if not isinstance(segments, list):
+                raise HTTPException(status_code=400, detail="«segments» должен быть списком")
+            try:
+                recording.segments = [Segment.from_dict(item) for item in segments]
+            except (AttributeError, TypeError, ValueError) as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=400, detail=f"Некорректная реплика: {exc}"
+                )
         names = payload.get("speaker_names")
-        if isinstance(names, dict):
+        if names is not None:
+            if not isinstance(names, dict):
+                raise HTTPException(
+                    status_code=400, detail="«speaker_names» должен быть объектом"
+                )
             recording.speaker_names = {str(k): str(v) for k, v in names.items()}
+        # the records table sends title/notes here too: accept them, otherwise
+        # a rename via PUT silently did nothing
+        if "title" in payload:
+            title = str(payload.get("title") or "").strip()
+            recording.title = title or None
+        if "notes" in payload:
+            notes = str(payload.get("notes") or "").strip()
+            recording.notes = notes or None
 
         new_composition = [(seg.id, seg.speaker) for seg in recording.segments]
         if new_composition != old_composition:
@@ -1735,12 +1790,25 @@ def create_app(
         body: Dict[str, object] = body if isinstance(body, dict) else {}
 
         term = str(body.get("term") or "").strip()
-        raw_aliases = body.get("aliases") or []
-        if isinstance(raw_aliases, str):
+        raw_aliases = body.get("aliases")
+        if raw_aliases is None:
+            raw_aliases = []
+        elif isinstance(raw_aliases, str):
             raw_aliases = re.split(r"[,\n;]+", raw_aliases)
+        elif isinstance(raw_aliases, dict):
+            raw_aliases = list(raw_aliases.keys())   # a stray object: keep its keys
+        elif not isinstance(raw_aliases, list):
+            raise HTTPException(
+                status_code=400,
+                detail="«aliases» должен быть списком вариантов (или строкой через запятую)",
+            )
         aliases = [str(a).strip() for a in raw_aliases if str(a).strip()]
         if not term:
             raise HTTPException(status_code=400, detail="Укажите термин")
+        if len(term) > 120:
+            raise HTTPException(status_code=400, detail="Слишком длинный термин (макс. 120 символов)")
+        if any(len(a) > 120 for a in aliases):
+            raise HTTPException(status_code=400, detail="Слишком длинный вариант (макс. 120 символов)")
         if not aliases:
             raise HTTPException(status_code=400, detail="Нужен хотя бы один вариант")
 

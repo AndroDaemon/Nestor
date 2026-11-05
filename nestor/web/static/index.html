@@ -1429,7 +1429,7 @@ async function loadRail() {
     shown.map(rec => [
       rec.id, rec.filename, rec.status, rec.stage,
       rec.duration, rec.speakers, rec.segments, rec.model, rec.error,
-      rec.processing_seconds, rec.rtf, rec.run_meta, rec.stage_seconds,
+      rec.processing_seconds, rec.rtf, rec.run_meta, rec.stage_seconds, rec.title, rec.notes,
     ]),
   ]);
   if (signature === state.railKey) {
@@ -1618,19 +1618,30 @@ function openTable() {
   state.tableOpen = true;
   $('table-view').classList.remove('hidden');
   $('btn-table').classList.add('active');
+  setTopActions(false);   // the record toolbar belongs to the editor, not the table
   loadRail().then(renderTable);
 }
 function closeTable() {
   state.tableOpen = false;
   $('table-view').classList.add('hidden');
   $('btn-table').classList.remove('active');
+  state.tableSel.clear();   // selection does not survive closing the table
+  tvUpdateBulk();
+  setTopActions(!!state.current);
 }
 
+function tvSpeedValue(rec) {
+  // the number the "Speed" column shows, so sorting matches what the user sees
+  if (rec.status !== 'done') return 0;
+  if (rec.duration > 0 && rec.processing_seconds > 0) return rec.duration / rec.processing_seconds;
+  if (rec.rtf > 0) return 1 / rec.rtf;
+  return 0;
+}
 function tvCompare(a, b) {
   const { key, dir } = state.tableSort;
   const va = a[key] ?? '', vb = b[key] ?? '';
   let cmp;
-  if (key === 'speed') cmp = (a.rtf || 0) - (b.rtf || 0);
+  if (key === 'speed') cmp = tvSpeedValue(a) - tvSpeedValue(b);
   else if (key === 'processing') cmp = (a.processing_seconds || 0) - (b.processing_seconds || 0);
   else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb, 'ru');
   else cmp = (va || 0) - (vb || 0);
@@ -2033,6 +2044,7 @@ function renderChips() {
     input.value = state.names[id] || '';
     input.placeholder = id;
     input.onchange = () => {
+      snapshot();                  // undoable: full state before the rename
       state.names[id] = input.value.trim();
       markDirty();
       sortChips();
@@ -2337,6 +2349,9 @@ function showRenamePopup(who, label) {
   cancel.textContent = 'Отмена';
   const commit = () => {
     const name = input.value.trim();
+    const before = state.names[label] || '';
+    if (name === before) { hideRenamePopup(); return; }  // nothing changed: no undo step
+    snapshot();                  // undoable: full state before the rename
     if (name) state.names[label] = name;
     else delete state.names[label];
     markDirty();
@@ -2724,9 +2739,14 @@ function renderSegments() {
       text.classList.remove('editing');
       box.classList.remove('has-editing');
       const clean = text.innerText.trim();
-      if (clean !== seg.text) {
-        seg.text = clean;
+      // seg.text already holds the typed value (oninput wrote it), so compare
+      // against the text captured before the edit, not against seg.text.
+      seg.text = clean;
+      if (clean !== state.editText) {
         text.textContent = clean;
+        commitEditSnapshot();        // one undo step for this edit (see beginEditSnapshot)
+      } else {
+        dropEditSnapshot();
       }
       if (query) renderSegments();   // re-apply the highlight after editing
     };
@@ -2744,6 +2764,7 @@ function renderSegments() {
       text.classList.add('editing');
       box.classList.add('has-editing');
       rememberCaret(seg, text);
+      beginEditSnapshot(seg);        // pre-edit state, committed on blur if changed
     };
 
     const tools = document.createElement('div');
@@ -2751,7 +2772,7 @@ function renderSegments() {
     const bm = document.createElement('button');
     bm.textContent = seg.bookmark ? '★ закладка' : '☆ закладка';
     if (seg.bookmark) bm.classList.add('bm');
-    bm.onclick = () => { seg.bookmark = !seg.bookmark; markDirty(); renderSegments(); renderBookmarks(); };
+    bm.onclick = () => { snapshot(); seg.bookmark = !seg.bookmark; markDirty(); renderSegments(); renderBookmarks(); };
     const merge = document.createElement('button');
     merge.textContent = 'подклеить';
     merge.dataset.tip = 'Добавить эту реплику к предыдущей';
@@ -3088,15 +3109,38 @@ function syncSpeakersFromSegments() {
   sortChips();
 }
 
-function snapshot() {
-  if (!state.current) return;
-  state.undo.push(JSON.stringify({
+function snapshotString() {
+  if (!state.current) return null;
+  return JSON.stringify({
     segments: state.current.segments,
     names: state.names,
     match: state.match,
     savedVoices: state.savedVoices,
-  }));
-    if (state.undo.length > 40) state.undo.shift();
+  });
+}
+function pushUndo(snap) {
+  if (!snap) return;
+  state.undo.push(snap);
+  if (state.undo.length > 40) state.undo.shift();
+}
+function snapshot() {
+  pushUndo(snapshotString());
+}
+// Text edits (typing in a segment, renaming a speaker) write into the state as
+// the user types, so a snapshot taken after the change would be useless. We
+// capture the pre-edit state on focus and push it on blur, only when the value
+// actually changed: one undo step per edit, and Ctrl+Z no longer reaches past
+// it, undoing the wrong thing.
+function beginEditSnapshot(seg) {
+  state.editSnapshot = snapshotString();
+  state.editText = seg ? seg.text : null;   // the text as it was before editing
+}
+function commitEditSnapshot() {
+  pushUndo(state.editSnapshot);
+  state.editSnapshot = null;
+}
+function dropEditSnapshot() {
+  state.editSnapshot = null;
 }
 function undo() {
   if (!state.undo.length) return toast('Нечего отменять');
@@ -3890,8 +3934,13 @@ $('btn-sample').onclick = async () => {
     form.append('file', blob, 'Пример — диалог.webm');
     const posted = await fetch('/api/recordings', { method: 'POST', body: form });
     if (!posted.ok) throw new Error('HTTP ' + posted.status);
+    const rec = await posted.json().catch(() => ({}));
     toast('Пример загружен — расшифровка началась');
-    loadRail();
+    await loadRail();
+    // track the job like a normal upload so progress, the done chime and the
+    // auto-open on finish work (it used to sit in the rail frozen)
+    if (rec && rec.id && !state.pending.includes(rec.id)) state.pending.push(rec.id);
+    watch();
   } catch (err) {
     toast('Не удалось загрузить пример: ' + err.message);
   } finally {
@@ -4152,6 +4201,79 @@ $('ctx-delete').onclick = async () => {
   } else {
     loadRail();
   }
+};
+
+// ---- bulk actions on the selected records (table checkboxes) ----------------
+function bulkSelected() {
+  const ids = state.tableSel;
+  return (state.recordings || []).filter(rec => ids.has(rec.id));
+}
+$('tv-bulk-clear').onclick = () => {
+  state.tableSel.clear();
+  renderTable();
+  tvUpdateBulk();
+};
+$('tv-bulk-speak').onclick = async () => {
+  const chosen = bulkSelected().filter(rec => !isWorking(rec));
+  if (!chosen.length) { toast('Нет подходящих записей — все уже обрабатываются'); return; }
+  let started = 0;
+  for (const rec of chosen) {
+    try {
+      const res = await fetch('/api/recordings/' + rec.id + '/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'speakers', options: {} }),
+      });
+      if (res.ok) {
+        started++;
+        if (!state.pending.includes(rec.id)) state.pending.push(rec.id);
+      }
+    } catch { /* skip a single failure, keep going */ }
+  }
+  toast(started ? `Распознавание спикеров запущено: ${started}` : 'Ни одну задачу не удалось запустить');
+  if (started) watch();
+  loadRail();
+};
+$('tv-bulk-export').onclick = () => {
+  const chosen = bulkSelected().filter(rec => rec.status === 'done');
+  if (!chosen.length) { toast('Выберите хотя бы одну расшифрованную запись'); return; }
+  for (const rec of chosen) {
+    const link = document.createElement('a');
+    link.href = withToken('/api/recordings/' + rec.id + '/export/txt');
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+  toast(`Выгрузка: ${chosen.length}`);
+};
+$('tv-bulk-delete').onclick = async () => {
+  const chosen = bulkSelected();
+  if (!chosen.length) return;
+  const busy = chosen.some(isWorking);
+  const question = busy
+    ? `Удалить выбранные записи (${chosen.length})? Среди них есть обрабатываемые — они будут остановлены. Действие необратимо.`
+    : `Удалить выбранные записи (${chosen.length}) вместе с расшифровками? Действие необратимо.`;
+  if (!(await showConfirm(question))) return;
+  let removed = 0;
+  for (const rec of chosen) {
+    if (state.current && state.current.id === rec.id) {
+      clearTimeout(state.saveTimer);
+      state.dirty = false;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    try {
+      const res = await fetch('/api/recordings/' + rec.id, { method: 'DELETE' });
+      if (res.ok) removed++;
+    } catch { /* keep going */ }
+  }
+  state.tableSel.clear();
+  toast(`Удалено: ${removed} из ${chosen.length}`);
+  if (state.current && !(state.recordings || []).some(r => r.id === state.current.id)) goHome();
+  loadRail().then(renderTable);
+  tvUpdateBulk();
 };
 
 $('ctx-process').onclick = () => {
@@ -4873,9 +4995,9 @@ function wireGlossaryPanel() {
         if (!out) return;
         out.style.display = '';
         out.innerHTML = data.changes && data.changes.length
-          ? escapeHtml(data.text) + '<br><span class="vp-meta">заменено: '
+          ? escapeHtml(data.text) + '<br><span class="vp-meta" style="display:inline-block; margin-top:4px">заменено: '
             + data.changes.map(c => `${escapeHtml(c.from)} → ${escapeHtml(c.to)}`).join(', ') + '</span>'
-          : escapeHtml(data.text) + '<br><span class="vp-meta">замен нет</span>';
+          : escapeHtml(data.text) + '<br><span class="vp-meta" style="display:inline-block; margin-top:4px">замен нет</span>';
       } catch { /* ignore */ }
     };
     input.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
@@ -4912,11 +5034,8 @@ function showGlossaryTermForm(opts) {
     const aliases = $('gl-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
     if (!term) { toast('Укажите термин'); return; }
     if (!aliases.length) { toast('Нужен хотя бы один вариант'); return; }
-    // renaming: drop the old canonical name first, otherwise the old row stays
-    if (original && original !== term) {
-      const del = await fetch('/api/glossary/term?term=' + encodeURIComponent(original), { method: 'DELETE' });
-      if (!del.ok) { toast('Не удалось изменить термин'); return; }
-    }
+    // Save the new term first; delete the old name only after that succeeded,
+    // so a failed save never leaves the term deleted.
     const res = await fetch('/api/glossary/term', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4924,7 +5043,12 @@ function showGlossaryTermForm(opts) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { toast('Не удалось сохранить: ' + (data.detail || res.status)); return; }
-    toast(original && original !== term ? 'Термин изменён' : 'Термин сохранён');
+    const renamed = original && original !== term;
+    if (renamed) {
+      const del = await fetch('/api/glossary/term?term=' + encodeURIComponent(original), { method: 'DELETE' });
+      if (!del.ok) { toast('Новый термин сохранён, но старый удалить не удалось'); }
+    }
+    toast(renamed ? 'Термин изменён' : 'Термин сохранён');
     await loadGlossary();
     showModal(renderGlossaryPanel(), true); wireGlossaryPanel();
   };
@@ -5004,8 +5128,17 @@ document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
 
   if (mod && e.key.toLowerCase() === 'z' && !editing) { e.preventDefault(); undo(); return; }
-  if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); return; }
-  if (mod && e.key.toLowerCase() === 'e') { e.preventDefault(); $('btn-export').click(); return; }
+  // Ctrl+F / Ctrl+E act on the open record; outside the editor they are no-ops
+  if (mod && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    if (state.current) { $('search').focus(); $('search').select(); }
+    return;
+  }
+  if (mod && e.key.toLowerCase() === 'e') {
+    e.preventDefault();
+    if (state.current) $('btn-export').click();
+    return;
+  }
   if (e.key === 'Escape') {
     if (confirmDismiss) confirmDismiss();  // resolve a pending confirm as "no"
     $('modal').classList.add('hidden');
@@ -5029,7 +5162,10 @@ window.addEventListener('resize', drawWave);
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text == null ? '' : String(text);
-  return div.innerHTML;
+  // also escape quotes: the result is used inside double-quoted attributes
+  // (value=, placeholder=, data-term=, aria-label=), where a bare quote would
+  // break out of the attribute
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 async function boot() {
   tvLoadPrefs();   // restore table sort/columns + rail filter saved by the user
