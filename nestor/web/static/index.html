@@ -372,7 +372,9 @@
   .gl-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, .02); }
   .gl-table tbody tr:hover { background: rgba(255, 52, 149, .06); }
   .gl-table td.gl-num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
-  .gl-table td.gl-term { font-weight: 600; white-space: nowrap; }
+  .gl-table td.gl-term {
+    font-weight: 600; white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  }
   .gl-table td.gl-act { text-align: right; white-space: nowrap; }
   .gl-table td.gl-act .btn { padding: 3px 10px; font-size: 12px; }
   .gl-table td.gl-act .btn + .btn { margin-left: 6px; }
@@ -3173,7 +3175,7 @@ function mergeIntoPrevious(seg) {
   // the merged segment keeps the previous speaker and its colour
   if (seg.bookmark) prev.bookmark = true;
   list.splice(i, 1);
-  markDirty(); renderSegments(); drawWave();
+  markDirty(); renderSegments(); renderBookmarks(); drawWave();
 }
 function splitSegment(seg, textEl) {
   const full = seg.text;

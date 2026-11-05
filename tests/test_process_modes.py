@@ -24,7 +24,7 @@ import nestor.web.app as app_module  # noqa: E402
 from nestor import cpuinfo  # noqa: E402
 from nestor.library import Library, Recording, Segment  # noqa: E402
 from nestor.types import Turn  # noqa: E402
-from nestor.web.app import ProcessBody, ProcessOptions  # noqa: E402
+from nestor.web.app import ProcessBody, ProcessOptions, build_export  # noqa: E402
 
 
 def _wait_for(predicate, timeout: float = 10.0) -> bool:
@@ -838,3 +838,56 @@ def test_upload_does_not_block_event_loop(app):
     result = asyncio.run(scenario())
     assert result["status"] == "added"
     assert library.load(result["id"]) is not None
+
+
+# ---------------------------------------------------------- export & progress
+def test_json_export_matches_other_formats_and_is_structured(tmp_path):
+    """QA М8: the JSON export used to hand back the internal record.json
+    (named `record.json`, editable-only fields) while every other format
+    produced `transcript.<fmt>` with the public structure."""
+    library = Library(tmp_path)
+    recording = Recording(id="rec1", filename="talk.wav", status="done")
+    recording.duration = 12.0
+    recording.model = "gigaam-v3-punct"
+    recording.segments = [Segment("s1", 0.0, 1.0, "SPEAKER_00", "привет")]
+    library.save(recording)
+
+    exported = build_export(library, "rec1", "json")
+    assert exported.name == "transcript.json"
+    import json as _json
+
+    payload = _json.loads(exported.read_text(encoding="utf-8"))
+    assert payload["source"] == "talk.wav"
+    assert payload["asr_model"] == "gigaam-v3-punct"
+    assert payload["segments"][0]["text"] == "привет"
+    # the internal record keeps editable bookkeeping, the export must not leak it
+    assert "job_settings" not in payload
+    assert "progress" not in payload
+
+
+def test_failed_job_resets_progress(tmp_path, monkeypatch):
+    """QA М11: a crashed run kept its last percentage, so the UI showed a
+    frozen progress bar next to an error."""
+    monkeypatch.setattr(
+        app_module,
+        "decode",
+        lambda p, on_progress=None: np.zeros(16000 * 4, dtype=np.float32),
+    )
+
+    def exploding(config, source, on_stage=None, waveform=None, cancel=None, progress=None):
+        if on_stage is not None:
+            on_stage("transcription", 0.4)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app_module, "process_file", exploding)
+    library = Library(tmp_path)
+    app = app_module.create_app(work_dir=tmp_path)
+    process = _endpoint(app, "POST", "/api/recordings/{record_id}/process")
+
+    library.save(Recording(id="rec1", filename="a.wav", status="added"))
+    (library.uploads_dir / "rec1").mkdir(parents=True, exist_ok=True)
+    (library.uploads_dir / "rec1" / "a.wav").write_bytes(b"fake")
+
+    process(record_id="rec1", body=ProcessBody(mode="full"))
+    assert _wait_for(lambda: library.load("rec1").status == "error")
+    assert library.load("rec1").progress == 0.0
