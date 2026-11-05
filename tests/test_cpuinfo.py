@@ -226,3 +226,32 @@ def test_default_settings_do_not_pin_to_performance_cores():
 
     assert settings.DEFAULTS["pin_performance"] is False
     assert settings.DEFAULTS["threads"] == 0
+
+
+# ------------------------------------------------- machine description (report)
+def test_cpu_name_is_cached(monkeypatch):
+    """The report asks for the CPU name on every run; the registry read is once."""
+    monkeypatch.setattr(cpuinfo, "IS_WINDOWS", True)
+    monkeypatch.setattr(cpuinfo, "_cpu_name_cache", None)
+    calls = {"n": 0}
+
+    def fake_registry():
+        calls["n"] += 1
+        # _registry_cpu_name normalises whitespace itself; the cache sits above it
+        return "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz"
+
+    monkeypatch.setattr(cpuinfo, "_registry_cpu_name", fake_registry)
+
+    assert cpuinfo.cpu_name() == "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz"
+    assert cpuinfo.cpu_name() == "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz"
+    assert calls["n"] == 1
+
+
+def test_total_ram_bytes_is_plausible_and_cached(monkeypatch):
+    monkeypatch.setattr(cpuinfo, "_ram_total_cache", None)
+    total = cpuinfo.total_ram_bytes()
+    # 0 means "unknown" on an exotic platform; anything else must be real RAM
+    assert total == 0 or total >= 256 * 1024 * 1024
+
+    monkeypatch.setattr(cpuinfo, "_ram_total_cache", 123456)
+    assert cpuinfo.total_ram_bytes() == 123456

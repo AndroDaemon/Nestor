@@ -246,6 +246,9 @@ def test_run_meta_written_and_exposed(app, monkeypatch):
     assert isinstance(meta["threads_used"], int) and meta["threads_used"] >= 1
     assert meta["cpu_physical_cores"] >= 1
     assert meta["cpu_logical_processors"] >= 1
+    # the report names the machine it ran on, not just the core count
+    assert isinstance(meta["cpu_name"], str)
+    assert meta["ram_total_bytes"] == 0 or meta["ram_total_bytes"] >= 256 * 1024 * 1024
     assert isinstance(meta["pin_applied"], bool)
     assert meta["pin_message"]
     assert meta["model"]

@@ -11,9 +11,11 @@ import os
 import shutil
 import subprocess
 import sys
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 try:  # the GUI backend is only needed to actually open the desktop window;
     import webview  # noqa: F401  (kept importable so tests run headless)
@@ -368,6 +370,22 @@ class DesktopApi:
         else:
             self._open(target.parent)
         return str(target)
+
+    def open_external(self, url: str) -> bool:
+        """Open an http(s) link in the user's browser, not inside the app.
+
+        The help window links to the Telegram channel; letting the WebView
+        handle it would navigate away from the app (and there is no Back).
+        Only http/https is accepted, so a malformed value cannot launch a
+        local file or a custom protocol handler.
+        """
+        parsed = urlparse(str(url or ""))
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return False
+        try:
+            return bool(webbrowser.open(parsed.geturl()))
+        except Exception:  # noqa: BLE001 - a bad link must never crash the app
+            return False
 
     @staticmethod
     def _open(path: Path) -> None:

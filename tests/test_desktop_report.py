@@ -83,3 +83,33 @@ def test_unique_path_does_not_overwrite(tmp_path):
 
     assert unique_path(tmp_path, "a.txt") == tmp_path / "a (2).txt"
     assert Path(first).read_text(encoding="utf-8") == "1"
+
+
+def test_open_external_uses_system_browser(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        "nestor.desktop_api.webbrowser.open",
+        lambda url: seen.append(url) or True,
+    )
+    api = DesktopApi.__new__(DesktopApi)
+
+    assert api.open_external("https://t.me/Nestor_transcribe") is True
+    assert seen == ["https://t.me/Nestor_transcribe"]
+
+
+def test_open_external_rejects_non_web_schemes(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "nestor.desktop_api.webbrowser.open",
+        lambda url: called.append(url) or True,
+    )
+    api = DesktopApi.__new__(DesktopApi)
+
+    for bad in (
+        "file:///C:/Windows/System32/calc.exe",
+        "javascript:alert(1)",
+        "not a url",
+        "",
+    ):
+        assert api.open_external(bad) is False
+    assert called == []

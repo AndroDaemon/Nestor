@@ -207,6 +207,23 @@
     max-height: 46vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
   }
   #report-body .report-actions { display: flex; gap: 8px; margin-top: 12px; }
+  /* Telegram footer at the very bottom of the help window. Deliberately quiet:
+     it is the last thing a reader sees after scrolling the whole guide. */
+  .help-footer {
+    display: flex; align-items: center; gap: 14px; margin-top: 20px;
+    padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .help-footer img {
+    width: 104px; height: 104px; flex: none; border-radius: 9px;
+    border: 1px solid var(--line); background: #fff;
+  }
+  .help-footer .help-tg { font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+  .help-footer .help-tg b { color: var(--text); font-weight: 600; }
+  .help-footer .help-tg a {
+    color: var(--accent); text-decoration: none;
+    border-bottom: 1px dotted currentColor; white-space: nowrap;
+  }
+  .help-footer .help-tg a:hover { border-bottom-style: solid; }
 
   /* ---------------------------------------------------- records table view */
   /* Full-page «Записи» view (Buzz-style): sortable columns, hidden-by-menu
@@ -1111,6 +1128,12 @@ function stageLines(rec) {
 }
 /* One plain-text diagnostics report for a finished recording: everything a
    benchmark row needs, without digging into log.txt or timings.json. */
+/* Total RAM for the report: bytes → "15,9 ГБ" (Russian decimal comma). */
+function fmtRam(bytes) {
+  if (!bytes) return '—';
+  const gb = bytes / 1024 ** 3;
+  return `${gb.toFixed(1).replace('.', ',')} ГБ`;
+}
 function reportText(rec) {
   const meta = rec.run_meta || {};
   const settings = meta.settings || {};
@@ -1133,6 +1156,8 @@ function reportText(rec) {
   lines.push(`  реплик: ${rec.segments != null ? rec.segments : '—'}, спикеров: ${rec.speakers != null ? rec.speakers : '—'}`);
   lines.push('');
   lines.push('Процессор и потоки');
+  lines.push(`  процессор: ${meta.cpu_name || '—'}`);
+  lines.push(`  оперативная память: ${fmtRam(meta.ram_total_bytes)}`);
   lines.push(`  физических ядер: ${meta.cpu_physical_cores ?? '—'}, логических: ${meta.cpu_logical_processors ?? '—'}`);
   lines.push(`  гибридный: ${meta.cpu_hybrid == null ? '—' : (meta.cpu_hybrid ? `да (быстрых ядер ${meta.cpu_perf_cores ?? '?'})` : 'нет')}`);
   lines.push(`  потоков: настройка «${meta.threads_setting ? meta.threads_setting : 'Автоматически'}» → использовано ${meta.threads_used ?? '—'}`);
@@ -4613,6 +4638,16 @@ $('btn-help').onclick = () => {
      встроенный браузер Microsoft Edge (WebView2). Код приложения — лицензия MIT.</p>
   <p style="margin-top:14px"><button class="btn" id="help-open-folder">Открыть папку с данными</button>
      <button class="btn" id="help-open-log" style="margin-left:8px">Открыть журнал</button></p>
+  <div class="help-footer">
+    <img src="/static/telegram-qr.png" alt="QR-код Telegram-канала @Nestor_transcribe"
+         width="104" height="104">
+    <div class="help-tg">
+      <b>Канал Nestor в Telegram</b><br>
+      Новости версий, ответы на вопросы и словари терминов от других пользователей.
+      Наведите камеру телефона на QR-код или откройте
+      <a href="https://t.me/Nestor_transcribe" id="help-tg-link">t.me/Nestor_transcribe</a>.
+    </div>
+  </div>
   `);
   const folder = $('help-open-folder');
   if (folder) folder.onclick = () => {
@@ -4628,6 +4663,18 @@ $('btn-help').onclick = () => {
       window.pywebview.api.open_log_file();
     } else {
       toast('Журнал: %LOCALAPPDATA%\\Nestor\\log.txt');
+    }
+  };
+  const tg = $('help-tg-link');
+  if (tg) tg.onclick = (e) => {
+    e.preventDefault();
+    const url = tg.getAttribute('href');
+    // In the desktop window a plain link would navigate the WebView away from
+    // the app; hand it to the system browser instead.
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_external) {
+      window.pywebview.api.open_external(url);
+    } else {
+      window.open(url, '_blank', 'noopener');
     }
   };
 };

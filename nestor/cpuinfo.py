@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import platform
 import sys
 from contextlib import contextmanager
 from typing import Dict, Optional
@@ -362,3 +363,84 @@ def describe_pinning(threads: int, pin_performance: bool) -> Dict[str, object]:
     info["reason"] = reason
     info["message"] = message
     return info
+
+
+# ------------------------------------------------------- machine description
+# The diagnostics report answers "on what machine was this run made?", so it
+# needs the marketing CPU name and the amount of RAM. Both are stdlib-only and
+# cached: they never change during a process and are read once per run report.
+_cpu_name_cache: Optional[str] = None
+_ram_total_cache: Optional[int] = None
+
+
+class _MemoryStatusEx(ctypes.Structure):
+    """``MEMORYSTATUSEX`` from the Win32 API (see GlobalMemoryStatusEx)."""
+
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+def _registry_cpu_name() -> str:
+    """CPU marketing name from the Windows registry (empty when unavailable)."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+        return " ".join(str(value).split())
+    except Exception:  # noqa: BLE001 - a missing key must not break the report
+        return ""
+
+
+def cpu_name() -> str:
+    """Human-readable CPU model, e.g. ``Intel(R) Core(TM) i5-8250U``.
+
+    On Windows the registry holds the marketing name; elsewhere
+    ``platform.processor()`` is the best stdlib source. Returns an empty string
+    when nothing is known, so callers can show a dash.
+    """
+    global _cpu_name_cache
+    if _cpu_name_cache is None:
+        name = _registry_cpu_name() if IS_WINDOWS else ""
+        if not name:
+            name = " ".join((platform.processor() or "").split())
+        _cpu_name_cache = name
+    return _cpu_name_cache
+
+
+def total_ram_bytes() -> int:
+    """Total physical memory in bytes (0 when unknown)."""
+    global _ram_total_cache
+    if _ram_total_cache is None:
+        total = 0
+        if IS_WINDOWS:
+            try:
+                status = _MemoryStatusEx()
+                status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(
+                    ctypes.byref(status)
+                ):
+                    total = int(status.ullTotalPhys)
+            except Exception:  # noqa: BLE001 - diagnostics must never fail
+                total = 0
+        if not total:
+            try:
+                total = int(os.sysconf("SC_PAGE_SIZE")) * int(
+                    os.sysconf("SC_PHYS_PAGES")
+                )
+            except (AttributeError, ValueError, OSError):
+                total = 0
+        _ram_total_cache = total
+    return _ram_total_cache
