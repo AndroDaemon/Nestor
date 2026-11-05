@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument(
         "--glossary-path",
         default=None,
-        help="path to a custom glossary YAML (default: bundled/user file)",
+        help="path to a custom glossary YAML (default: the term list in the data folder)",
     )
     transcribe.add_argument("--quiet", action="store_true")
     transcribe.set_defaults(func=cmd_transcribe)

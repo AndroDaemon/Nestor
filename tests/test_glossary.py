@@ -19,18 +19,16 @@ from nestor.glossary import (  # noqa: E402
     Term,
     apply_to_segments,
     build_alias_map,
-    default_glossary_path,
     dump_glossary,
-    editable_glossary_path,
-    glossary_source,
+    ensure_glossary,
     load_glossary,
     merge_glossary,
     postcorrect,
     remove_term,
     resolve_glossary_path,
     save_glossary,
+    seed_glossary_text,
     upsert_term,
-    user_glossary_path,
 )
 from nestor.types import Segment, Word  # noqa: E402
 
@@ -41,11 +39,11 @@ def _glossary(tmp_path: Path, body: str) -> Path:
     return path
 
 
-def test_bundled_glossary_loads():
-    path = default_glossary_path()
-    assert path.exists(), f"bundled glossary missing: {path}"
-    glossary = load_glossary(path)
+def test_shipped_glossary_parses():
+    # the term list that seeds a fresh data root on first use
+    glossary = Glossary.parse(seed_glossary_text())
     assert len(glossary) >= 100
+    assert any(t.term == "Docker" for t in glossary.terms)
 
 
 def test_simple_alias_replaced():
@@ -140,11 +138,14 @@ def test_missing_and_broken_glossary_are_empty(tmp_path):
     assert len(load_glossary(broken)) == 0  # never raises
 
 
-def test_resolve_prefers_user_file(tmp_path):
-    user = _glossary(tmp_path, '- term: "X"\n  aliases: ["y"]\n')
-    assert resolve_glossary_path(tmp_path) == user
-    # nothing there -> bundled file
-    assert resolve_glossary_path(tmp_path / "empty") == default_glossary_path()
+def test_resolve_creates_and_returns_the_single_file(tmp_path):
+    # there is exactly one glossary: <data root>/hotwords.yaml, created on use
+    target = resolve_glossary_path(tmp_path)
+    assert target == tmp_path / "hotwords.yaml"
+    assert target.exists()
+    assert len(load_glossary(target)) >= 100
+    # a second call returns the same file rather than re-seeding it
+    assert resolve_glossary_path(tmp_path) == target
 
 
 def test_realistic_sentence(tmp_path):
@@ -235,20 +236,14 @@ def test_merge_glossary_counts_new_terms():
     assert next(t for t in base.terms if t.term == "Docker").aliases == ["докер", "докерс"]
 
 
-def test_editable_path_seeds_from_bundled(tmp_path):
-    target = editable_glossary_path(tmp_path)
-    assert target == user_glossary_path(tmp_path)
+def test_ensure_glossary_seeds_once(tmp_path):
+    target = ensure_glossary(tmp_path)
+    assert target == tmp_path / "hotwords.yaml"
     assert target.exists()
-    # it was seeded with the bundled glossary's content
+    # it was seeded with the shipped term list
     assert len(load_glossary(target)) >= 100
     # a second call is a no-op, not a re-seed
     upsert_term(load_glossary(target), "TestTerm", ["тесттерм"])
     save_glossary(load_glossary(target), target)
-    assert "TestTerm" in editable_glossary_path(tmp_path).read_text(encoding="utf-8")
-
-
-def test_glossary_source_reports_origin(tmp_path):
-    assert glossary_source(tmp_path) == "bundled"
-    save_glossary(Glossary([Term(term="X", aliases=["y"])]), user_glossary_path(tmp_path))
-    assert glossary_source(tmp_path) == "user"
+    assert "TestTerm" in ensure_glossary(tmp_path).read_text(encoding="utf-8")
 

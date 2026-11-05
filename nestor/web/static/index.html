@@ -382,10 +382,19 @@
   .gl-add-form { display: flex; gap: 8px; margin: 12px 0 2px; flex-wrap: wrap; }
   .gl-add-form input { flex: 1 1 160px; }
   .gl-preview-out {
-    margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line);
+    margin-top: 6px; padding: 8px 12px; border: 1px solid var(--line);
     border-radius: 10px; background: var(--panel); white-space: pre-wrap;
     word-break: break-word; line-height: 1.5;
   }
+  /* компактная строка «проверить фразу»: поле и результат в один ряд */
+  .gl-preview { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; }
+  .gl-preview input {
+    flex: 0 0 320px; width: 320px; padding: 8px 10px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 13px;
+  }
+  .gl-preview input:focus { outline: none; border-color: var(--accent); }
+  .gl-preview .gl-preview-out { flex: 1 1 auto; margin-top: 0; min-width: 0; }
   .gl-preview-out mark { background: rgba(255,52,149,.2); color: var(--accent); border-radius: 4px; padding: 0 2px; }
   /* попап переименования спикера у строки реплики */
   #rename-pop {
@@ -657,6 +666,10 @@
   /* the flex column would stretch it: keep «Закрыть» a compact right-aligned pill */
   .modal.wide .box > .close { align-self: flex-end; flex: none; }
   .modal h1 { font-size: 20px; margin: 0 0 14px; }
+  /* dictionary header: title and the term count on one line */
+  .gl-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; }
+  .gl-head h1 { margin: 0; }
+  .gl-head-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
   .modal h2 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
   .modal p, .modal li { color: #cccccc; font-size: 14px; }
   .modal .close { float: right; }
@@ -718,12 +731,12 @@
     <span class="track"><i class="fill" id="activity-fill"></i></span>
     <button class="stop-btn" id="activity-stop" data-tip="Остановить обработку">⏹</button>
   </div>
-  <div class="top-actions">
-    <div class="search-wrap">
+  <div class="top-actions" id="top-actions">
+    <div class="search-wrap top-action hidden">
       <input class="search" id="search" type="search" placeholder="Поиск по тексту…">
       <span class="search-count hidden" id="search-count"></span>
     </div>
-    <div class="menu-wrap">
+    <div class="menu-wrap top-action hidden">
       <button class="btn" id="btn-export" data-tip="Сохранить расшифровку в файл или в буфер обмена">Выгрузить ▾</button>
       <div class="menu hidden" id="export-menu">
         <button data-fmt="docx">Word — <b>.docx</b></button>
@@ -756,7 +769,7 @@
     <div class="rail-list" id="rail"></div>
     <div class="rail-foot">
       <button type="button" class="rail-jump" id="btn-voices" data-tip="Сохранённые голоса, имена и точность узнавания">Голоса</button>
-      <button type="button" class="rail-jump" id="btn-glossary" data-tip="Список терминов: что Nestor заменяет и на что">Словарь</button>
+      <button type="button" class="rail-jump" id="btn-glossary" data-tip="Список терминов: что Nestor заменяет и на что">Термины</button>
       <button class="help-btn" id="btn-help" data-tip="Как работает Nestor, приватность и лицензии">?</button>
       <div id="app-version" title="Версия Nestor">Nestor</div>
     </div>
@@ -777,6 +790,19 @@
         </div>
 
         <div class="settings">
+          <div class="group-label" style="grid-column:1/-1;margin-top:0">Запуск и уведомления</div>
+          <label class="field wide check-row">
+            <input type="checkbox" id="auto-start" checked style="width:auto">
+            <span>Начинать расшифровку немедленно при добавлении</span>
+          </label>
+          <label class="field wide check-row">
+            <input type="checkbox" id="sound-done" style="width:auto">
+            <span>Звуковой сигнал по окончании обработки</span>
+          </label>
+          <label class="field wide check-row">
+            <input type="checkbox" id="notify-done" style="width:auto">
+            <span>Уведомление Windows по окончании обработки</span>
+          </label>
           <label class="field wide" id="preset-field">
             <span>Готовые наборы</span>
             <div class="pill-group" id="preset-pills">
@@ -855,19 +881,6 @@
               <input type="checkbox" id="pin-performance" style="width:auto">
               <span>Использовать быстрые ядра</span>
               <span class="hint">На новых процессорах (Intel с «производительными» и «энергосберегающими» ядрами) держит обработку только на быстрых ядрах. В замерах это оказалось медленнее, чем отдать все ядра системе, поэтому по умолчанию выключено. На обычных процессорах ни на что не влияет.</span>
-            </label>
-            <div class="group-label">Запуск и уведомления</div>
-            <label class="field wide check-row">
-              <input type="checkbox" id="auto-start" checked style="width:auto">
-              <span>Начинать расшифровку немедленно при добавлении</span>
-            </label>
-            <label class="field wide check-row">
-              <input type="checkbox" id="sound-done" style="width:auto">
-              <span>Звуковой сигнал по окончании обработки</span>
-            </label>
-            <label class="field wide check-row">
-              <input type="checkbox" id="notify-done" style="width:auto">
-              <span>Уведомление Windows по окончании обработки</span>
             </label>
           </details>
         </div>
@@ -1963,6 +1976,7 @@ async function openRecording(id) {
   audio.src = withToken('/api/recordings/' + id + '/media');
   audio.load();
 
+  setTopActions(true);
   renderChips();
   renderSegments();
   renderBookmarks();
@@ -3902,10 +3916,18 @@ function playDoneSound() {
 }
 
 /* --------------------------------------------------------------------- misc */
+/* The export button and the transcript search only make sense once a recording
+   is open — with nothing to export and nothing to search they are hidden. */
+function setTopActions(visible) {
+  document.querySelectorAll('#top-actions .top-action')
+    .forEach((el) => el.classList.toggle('hidden', !visible));
+}
+
 function goHome() {
   $('home').classList.remove('hidden');
   $('sheet-view').classList.add('hidden');
   $('dock').classList.add('hidden');
+  setTopActions(false);
   state.current = null;
   hideRenamePopup();
   loadRail();
@@ -4713,8 +4735,6 @@ function glossaryRows() {
 
 function renderGlossaryPanel() {
   const { terms, filtered } = glossaryRows();
-  const srcLabel = state.glossary && state.glossary.source === 'user'
-    ? 'свой файл' : 'встроенный словарь';
   const sortDir = state.glossarySort === 'desc' ? 'desc' : 'asc';
   const ordered = filtered.slice().sort((a, b) => {
     const r = a.term.localeCompare(b.term, 'ru', { sensitivity: 'base' });
@@ -4737,11 +4757,10 @@ function renderGlossaryPanel() {
       </td>
     </tr>`).join('');
   return `
-    <h1>Словарь терминов</h1>
-    <p class="sub" style="text-align:left">Nestor слышит «докер», «днс», «айпи» так, как это
-       произносят, и заменяет их на канонические — Docker, DNS, IP-адрес. Ниже — что за чем
-       следит. Источник: <b>${escapeHtml(srcLabel)}</b> (${terms.length} терминов).
-       Встроенный словарь не меняется — ваши правки хранятся отдельным файлом.</p>
+    <div class="gl-head">
+      <h1>Словарь терминов</h1>
+      <span class="gl-head-count">${terms.length} ${plural(terms.length, 'термин', 'термина', 'терминов')}</span>
+    </div>
     <div class="vp-actions">
       <button class="btn" id="gl-export" data-tip="Сохранить словарь файлом — чтобы перенести на другой компьютер или отредактировать вручную">Экспорт в файл…</button>
       <button class="btn" id="gl-import" data-tip="Добавить термины из YAML/JSON-файла">Импорт из файла…</button>
@@ -4766,10 +4785,10 @@ function renderGlossaryPanel() {
         <tbody>${rows || '<tr><td colspan="4" class="gl-empty">Ничего не найдено — измените запрос.</td></tr>'}</tbody>
       </table>
     </div>
-    <h2 style="margin-top:18px">Проверить текст</h2>
-    <p class="sub" style="text-align:left">Вставьте фразу — покажу, что и на что заменится.</p>
-    <textarea id="gl-preview-input" rows="2" style="width:100%; margin:6px 0 0" placeholder="например: подними докер и проверь днс"></textarea>
-    <div id="gl-preview-out" class="gl-preview-out" style="display:none"></div>`;
+    <div class="gl-preview">
+      <input type="text" id="gl-preview-input" placeholder="Проверить фразу — покажу, что и на что заменится" autocomplete="off">
+      <div id="gl-preview-out" class="gl-preview-out" style="display:none"></div>
+    </div>`;
 }
 
 function wireGlossaryPanel() {

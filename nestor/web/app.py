@@ -49,15 +49,13 @@ from ..glossary import (
     Glossary,
     build_alias_map,
     dump_glossary,
-    editable_glossary_path,
-    glossary_source,
+    ensure_glossary,
     load_glossary,
     merge_glossary,
     remove_term,
     resolve_glossary_path,
     save_glossary,
     upsert_term,
-    user_glossary_path,
 )
 from ..library import Library, Recording, Segment
 from ..pipeline import JobCancelled, process_file
@@ -1714,11 +1712,10 @@ def create_app(
     # ---------------------------------------------------------------- glossary
     @app.get("/api/glossary")
     def get_glossary() -> Dict[str, object]:
-        """Terms currently in effect, plus where the list comes from."""
+        """The single list of terms, plus where its file lives."""
         path = resolve_glossary_path(lib.root)
         glossary = load_glossary(path)
         return {
-            "source": glossary_source(lib.root),
             "path": str(path),
             "count": len(glossary),
             "terms": [
@@ -1746,7 +1743,7 @@ def create_app(
         if not aliases:
             raise HTTPException(status_code=400, detail="Нужен хотя бы один вариант")
 
-        target = editable_glossary_path(lib.root)
+        target = ensure_glossary(lib.root)
         glossary = load_glossary(target)
         upsert_term(glossary, term, aliases)
         save_glossary(glossary, target)
@@ -1759,7 +1756,7 @@ def create_app(
         name = (term or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Укажите термин")
-        target = editable_glossary_path(lib.root)
+        target = ensure_glossary(lib.root)
         glossary = load_glossary(target)
         removed = remove_term(glossary, name)
         if not removed:
@@ -1820,7 +1817,7 @@ def create_app(
         if not incoming:
             raise HTTPException(status_code=400, detail="В файле нет терминов")
 
-        target = editable_glossary_path(lib.root)
+        target = ensure_glossary(lib.root)
         glossary = load_glossary(target)
         added = merge_glossary(glossary, incoming)
         save_glossary(glossary, target)

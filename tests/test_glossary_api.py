@@ -15,15 +15,14 @@ def _client(tmp_path) -> TestClient:
     return TestClient(create_app(work_dir=tmp_path))
 
 
-def test_get_returns_bundled_glossary(tmp_path):
+def test_get_returns_the_single_glossary(tmp_path):
     client = _client(tmp_path)
     data = client.get("/api/glossary").json()
-    assert data["source"] == "bundled"
     assert data["count"] >= 100
     assert any(t["term"] == "Docker" for t in data["terms"])
 
 
-def test_add_creates_user_file_and_flips_source(tmp_path):
+def test_add_persists_to_the_glossary_file(tmp_path):
     client = _client(tmp_path)
     response = client.post(
         "/api/glossary/term", json={"term": "TestTerm", "aliases": ["тесттерм", "testterm"]}
@@ -35,9 +34,8 @@ def test_add_creates_user_file_and_flips_source(tmp_path):
     assert body["count"] >= 101
 
     after = client.get("/api/glossary").json()
-    assert after["source"] == "user"
     assert any(t["term"] == "TestTerm" for t in after["terms"])
-    # the user file exists on disk and other terms were preserved
+    # the single glossary file exists on disk and other terms were preserved
     assert (tmp_path / "hotwords.yaml").exists()
 
 

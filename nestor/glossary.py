@@ -11,13 +11,14 @@ sherpa-onnx hotwords (``modified_beam_search``) — was measured on Russian
 speech and rejected: it added almost nothing over the post-correction, cost
 ~1.5x decode time, and sometimes turned a correct word into a wrong one.
 
-The glossary is a YAML file:
+The glossary is a single YAML file at ``<data root>/hotwords.yaml``:
 
     - term: "API"                # canonical form, what lands in the transcript
       aliases: ["апи", "api"]    # heard / mis-spelled forms to replace
 
-A user copy lives at ``<data root>/hotwords.yaml``; when absent the bundled
-:func:`default_glossary_path` is used. Nothing here touches the network.
+On first use the file is created from the term list shipped inside the package,
+so there is exactly one list — the user's — with no separate built-in one.
+Nothing here touches the network.
 """
 
 from __future__ import annotations
@@ -101,18 +102,42 @@ class Glossary:
 # --------------------------------------------------------------------------- #
 # Paths and caching
 # --------------------------------------------------------------------------- #
-def default_glossary_path() -> Path:
-    """The glossary shipped with the package (used when the user has none)."""
-    return Path(__file__).resolve().parent / "data" / "hotwords.yaml"
+def seed_glossary_text() -> str:
+    """The initial term list written on first use (ships inside the package)."""
+    return (Path(__file__).resolve().parent / "data" / "hotwords.yaml").read_text(
+        encoding="utf-8"
+    )
 
 
 def resolve_glossary_path(root: "str | Path | None" = None) -> Path:
-    """Prefer a user glossary in ``root``; fall back to the bundled one."""
-    if root is not None:
-        candidate = Path(root) / "hotwords.yaml"
-        if candidate.exists():
-            return candidate
-    return default_glossary_path()
+    """The one glossary file: ``<data root>/hotwords.yaml``.
+
+    There is a single list of terms. ``root`` selects the data folder; when it
+    is None (CLI corner cases) the default data root is used. The file is
+    created from the shipped list on first access, so the path returned can be
+    opened for reading right away.
+    """
+    if root is None:
+        from .library import default_root
+
+        root = default_root()
+    return ensure_glossary(root)
+
+
+def ensure_glossary(root: "str | Path") -> Path:
+    """Return ``<root>/hotwords.yaml``, creating it from the shipped list.
+
+    Safe to call on every request: once the file exists this is a no-op.
+    """
+    target = Path(root) / "hotwords.yaml"
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            text = seed_glossary_text()
+        except OSError:
+            text = ""
+        _write_glossary_text(target, text)
+    return target
 
 
 _CACHE: Dict[Tuple[str, float], Optional[Glossary]] = {}
@@ -124,7 +149,7 @@ def load_glossary(path: "str | Path | None" = None) -> Glossary:
     The cache is keyed by the resolved path and its modification time, so an
     edit to ``hotwords.yaml`` is picked up without restarting the app.
     """
-    resolved = Path(path) if path is not None else default_glossary_path()
+    resolved = Path(path) if path is not None else resolve_glossary_path()
     try:
         stamp = resolved.stat().st_mtime
     except OSError:
@@ -277,34 +302,12 @@ def apply_to_segments(segments: Sequence, glossary: Glossary) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Editing — the user glossary file
+# Editing — the glossary file
 # --------------------------------------------------------------------------- #
-def user_glossary_path(root: "str | Path") -> Path:
-    """Where a user's own glossary lives (``<data root>/hotwords.yaml``)."""
-    return Path(root) / "hotwords.yaml"
-
-
-def glossary_source(root: "str | Path | None" = None) -> str:
-    """``"user"`` when the data-root file exists, else ``"bundled"``."""
-    if root is not None and user_glossary_path(root).exists():
-        return "user"
-    return "bundled"
-
-
-def editable_glossary_path(root: "str | Path") -> Path:
-    """The file edits should go to: the user file, seeded from the bundled one.
-
-    The bundled glossary lives inside the installed package and would be
-    overwritten by an update, so the first edit copies it to the data root and
-    every later edit works on that copy. Returns the path (not yet written).
-    """
-    target = user_glossary_path(root)
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        bundled = default_glossary_path()
-        if bundled.exists():
-            target.write_text(bundled.read_text(encoding="utf-8"), encoding="utf-8")
-    return target
+def _write_glossary_text(path: Path, text: str) -> None:
+    """Best-effort write of the seed file (the loader tolerates failure)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def dump_glossary(glossary: Glossary) -> str:
@@ -389,16 +392,14 @@ __all__ = [
     "SHORT_ALIAS_CHARS",
     "apply_to_segments",
     "build_alias_map",
-    "default_glossary_path",
     "dump_glossary",
-    "editable_glossary_path",
-    "glossary_source",
+    "ensure_glossary",
     "load_glossary",
     "merge_glossary",
     "postcorrect",
     "remove_term",
     "resolve_glossary_path",
     "save_glossary",
+    "seed_glossary_text",
     "upsert_term",
-    "user_glossary_path",
 ]
