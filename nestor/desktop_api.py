@@ -267,7 +267,6 @@ class DesktopApi:
         if not result:
             return None
         target = Path(result if isinstance(result, str) else result[0])
-        payload = VoiceprintLibrary(self.library.root).export_data()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
             json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"

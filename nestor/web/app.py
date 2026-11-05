@@ -31,6 +31,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
@@ -2011,13 +2012,13 @@ def create_app(
         }
 
     @app.get("/api/voiceprints/export")
-    def export_voiceprints(slugs: Optional[str] = None) -> Response:
+    def export_voiceprints(slug: Optional[List[str]] = Query(None)) -> Response:
         """Voices as one portable JSON file.
 
         ``?slug=a&slug=b`` exports only the chosen voices (the panel's
         checkbox selection); no query = the whole library (full backup).
         """
-        chosen = slugs.split(",") if slugs else None
+        chosen = [s for s in (slug or []) if s] or None
         payload = voices.export_data(chosen)
         stamp = datetime.now().strftime("%Y-%m-%d")
         count = payload.get("count")

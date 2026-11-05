@@ -1942,6 +1942,11 @@ async function openRecording(id) {
   state.filterSpeaker = null;
   state.searchCursor = null;
   state.playUntil = null;
+  // the undo stack and caret memory belong to the record we are leaving: a
+  // stale snapshot applied here would overwrite THIS record with the other
+  // one's segments and then save them (silent data loss)
+  state.undo = [];
+  state.caret = {};
   if (state.soloTimer) { clearInterval(state.soloTimer); state.soloTimer = null; }
   $('search').value = '';
   setSaveState('idle');
@@ -3214,10 +3219,13 @@ async function save() {
     });
     if (res.status === 409) {
       // the record is being re-processed; the worker owns the file, so the
-      // edits cannot be written now — keep them only in memory and warn once
+      // edits cannot be written now. Keep them dirty and retry — otherwise
+      // they would be lost for good once the worker finishes.
       state.dirty = true;
       setSaveState('error');
-      toast('Идёт обработка — правки пока не сохраняются на диск');
+      clearTimeout(state.saveTimer);
+      state.saveTimer = setTimeout(save, 3000);
+      toast('Идёт обработка — правки сохранятся после её окончания');
       return;
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -3637,7 +3645,11 @@ async function watch() {
     if (finished) {
       // reopen the sheet only when it does not yank the user away from what
       // they are doing (viewing another record); otherwise just toast
-      if (!state.current || state.current.id === finished.id) {
+      // Never reload the sheet over unsaved edits made while the worker owned
+      // the file: keep them in memory (the 409 retry flushes them) instead of
+      // replacing them with the worker's output.
+      const sameRecord = state.current && state.current.id === finished.id;
+      if (!state.current || (sameRecord && !state.dirty)) {
         openRecording(finished.id);
       }
       toast('Расшифровка готова: ' + finished.filename);
@@ -3929,6 +3941,8 @@ function goHome() {
   $('dock').classList.add('hidden');
   setTopActions(false);
   state.current = null;
+  state.undo = [];
+  state.caret = {};
   hideRenamePopup();
   loadRail();
 }
