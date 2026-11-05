@@ -1047,6 +1047,7 @@ const state = {
   railSearchTimer: null,
   railKey: null,       // signature of the last rail render (skip rebuilds)
   railExpanded: new Set(), // rail record ids with the details block expanded
+  modalReturnFocus: null,  // element to refocus when the dialog closes (see showModal)
 };
 
 const audio = $('audio');
@@ -1673,7 +1674,12 @@ function renderTable() {
         renderTable();
       };
     }
-    th.oncontextmenu = (e) => { e.preventDefault(); tvShowColsMenu(e.clientX, e.clientY); };
+    th.oncontextmenu = (e) => {
+      e.preventDefault();
+      // same single columns menu as the «Колонки ▾» button; toggle like it does
+      if ($('tv-cols-menu')) { tvHideColsMenu(); return; }
+      tvShowColsMenu(e.clientX, e.clientY);
+    };
     head.appendChild(th);
   }
 
@@ -1753,6 +1759,7 @@ function renderTable() {
     }
     tr.onclick = () => openRecording(rec.id);
     tr.oncontextmenu = (e) => { e.preventDefault(); showJobMenu(rec, e.clientX, e.clientY); };
+    tr.tabIndex = 0;   // makes the row reachable by Tab so its Enter/Delete keys work
     tr.onkeydown = (e) => {
       if (e.key === 'Enter') { e.preventDefault(); openRecording(rec.id); }
       if (e.key === 'Delete') { e.preventDefault(); state.ctxRec = rec; $('ctx-delete').click(); }
@@ -3541,23 +3548,48 @@ drop.onclick = () => {
 };
 fileInput.onchange = () => upload([...fileInput.files]);
 
+/* Re-importing a file that is already in the list is easy to do by accident.
+   If it was already transcribed, ask whether to transcribe it again; if it is
+   still being processed, just point that out. Returns 'again' | 'skip' | 'add'. */
+async function confirmReimport(path, name) {
+  const target = String(path || '').toLowerCase();
+  const base = String(name || '').toLowerCase();
+  const same = (state.recordings || []).filter(rec =>
+    (target && rec.source_path && rec.source_path.toLowerCase() === target) ||
+    (!target && (rec.filename || '').toLowerCase() === base));
+  if (!same.length) return 'add';
+  if (!same.some(rec => rec.status === 'done')) {
+    toast(`«${name}» уже есть в записях`);
+    return 'skip';
+  }
+  const again = await showConfirm(
+    `Файл «${name}» уже расшифрован. Запустить расшифровку заново?`,
+    { ask: true, confirmText: 'Расшифровать заново' });
+  return again ? 'again' : 'skip';
+}
+
 async function importNativeFiles() {
   try {
     const paths = await window.pywebview.api.open_files_dialog();
     if (!paths || !paths.length) return;
     for (const path of paths) {
+      const name = String(path).split(/[\\/]/).pop();
+      const action = await confirmReimport(path, name);
+      if (action === 'skip') continue;
+      const autoStart = $('auto-start').checked || action === 'again';
       const res = await fetch('/api/recordings/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, auto_start: $('auto-start').checked }),
+        body: JSON.stringify({ path, auto_start: autoStart }),
       });
       const rec = await res.json().catch(() => ({}));
       if (!res.ok) { toast(rec.detail || 'Ошибка импорта'); continue; }
-      toast(`«${rec.filename}» добавлена в записи`);
-      if ($('auto-start').checked) state.pending.push(rec.id);
+      toast(autoStart ? `«${rec.filename}» добавлена в обработку`
+                      : `«${rec.filename}» добавлена в записи`);
+      if (autoStart && !state.pending.includes(rec.id)) state.pending.push(rec.id);
     }
     await loadRail();
-    if ($('auto-start').checked) watch();
+    if (state.pending.length) watch();
   } catch (err) {
     toast('Не удалось открыть файлы: ' + err);
   }
@@ -3626,6 +3658,11 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
   uploadDepth += files.length;
   for (let index = 0; index < files.length; index++) {
     const file = files[index];
+    // a file with the same name is probably already in the list: ask before
+    // adding a second copy (and whether to transcribe the already done one again)
+    const action = await confirmReimport('', file.name);
+    if (action === 'skip') { uploadDepth--; continue; }
+    const run = autoStart || action === 'again';
     const rest = uploadDepth - 1;  // files still queued after this one
     const label = (name, pct) =>
       `Загрузка «${name}»${rest ? ` — осталось файлов: ${rest}` : ''} — ${pct}%`;
@@ -3641,7 +3678,7 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
       form.append('vp_segment_agreement', vpAgreement);
       form.append('merge_speakers', mergeMinWeight > 0 ? 'true' : 'false');
       form.append('merge_min_weight', mergeMinWeight);
-      form.append('auto_start', autoStart ? 'true' : 'false');
+      form.append('auto_start', run ? 'true' : 'false');
       drop.classList.add('over');
       dropBusy(label(file.name, 0));
       const res = await postRecording(form, (fraction) =>
@@ -3649,9 +3686,9 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
       const rec = res.data;
       if (res.status !== 200) { toast(rec.detail || 'Ошибка загрузки'); continue; }
       dropBusy(`«${file.name}» — сохранение…`);
-      toast(autoStart ? `«${file.name}» добавлена в обработку` : `«${file.name}» добавлена в записи`);
+      toast(run ? `«${file.name}» добавлена в обработку` : `«${file.name}» добавлена в записи`);
       await loadRail();
-      if (autoStart) state.pending.push(rec.id);
+      if (run && !state.pending.includes(rec.id)) state.pending.push(rec.id);
     } catch (err) {
       toast('Не удалось загрузить: ' + err.message);
     } finally {
@@ -3660,7 +3697,7 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
     }
   }
   fileInput.value = '';
-  if (autoStart) watch();
+  if (state.pending.length) watch();
   else loadRail();
 }
 
@@ -4401,7 +4438,12 @@ $('search').onkeydown = (e) => {
 };
 $('btn-export').onclick = (e) => {
   e.stopPropagation();
-  $('export-menu').classList.toggle('hidden');
+  const menu = $('export-menu');
+  const willShow = menu.classList.contains('hidden');
+  menu.classList.toggle('hidden');
+  // anchor the menu to the button explicitly: a hidden toolbar used to leave it
+  // in the corner with no position at all
+  if (willShow) { menu.style.position = 'fixed'; placePopup(menu, e.currentTarget); }
 };
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.menu-wrap')) $('export-menu').classList.add('hidden');
@@ -4420,34 +4462,68 @@ $('modal-close').onclick = () => $('modal').classList.add('hidden');
 $('modal').onclick = (e) => { if (e.target === $('modal')) $('modal').classList.add('hidden'); };
 
 function showModal(html, wide = false) {
+  // remember what had focus so it can be restored on close, and keep Tab
+  // inside the dialog while it is open
+  state.modalReturnFocus = document.activeElement;
   $('modal-body').innerHTML = html;
   $('modal').classList.toggle('wide', !!wide);
   $('modal').classList.remove('hidden');
+  normalizeModalFocus();
 }
 
 function closeModal() {
   $('modal').classList.add('hidden');
   $('modal').classList.remove('wide');
+  if (state.modalReturnFocus && state.modalReturnFocus.focus) {
+    try { state.modalReturnFocus.focus(); } catch (err) { /* element gone */ }
+  }
+  state.modalReturnFocus = null;
 }
+
+/* Keep keyboard focus within the open dialog: Tab from the last control wraps
+   to the first and Shift+Tab from the first wraps back. */
+function normalizeModalFocus(event) {
+  const modal = $('modal');
+  if (!modal || modal.classList.contains('hidden')) return true;
+  const focusables = [...modal.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.disabled && el.offsetParent !== null);
+  if (!focusables.length) return true;
+  if (!modal.contains(document.activeElement)) { focusables[0].focus(); return false; }
+  if (!event || event.key !== 'Tab') return true;
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); return false; }
+  if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); return false; }
+  return true;
+}
+$('modal').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  normalizeModalFocus(e);
+});
 
 /* In-app replacement for the native confirm() (whose title showed
    "Сообщение с 127.0.0.1:..."). Returns Promise<boolean>. A pending confirm
    is resolved as "false" by Escape or by any other modal opening over it. */
 let confirmDismiss = null;
-function showConfirm(question, { danger = true, confirmText = 'Удалить' } = {}) {
+function showConfirm(question, { danger = true, confirmText = 'Удалить', ask = false } = {}) {
   return new Promise((resolve) => {
     if (confirmDismiss) confirmDismiss();  // resolve a previous pending confirm
+    state.modalReturnFocus = document.activeElement;
     $('modal-body').innerHTML = `
-      <h1>Подтверждение</h1>
+      <h1>${ask ? 'Вопрос' : 'Подтверждение'}</h1>
       <p style="margin:10px 0 18px; text-align:left; line-height:1.5">${escapeHtml(question)}</p>
       <div style="display:flex; gap:10px; justify-content:flex-end">
-        <button class="btn" id="confirm-no">Отмена</button>
-        <button class="btn ${danger ? 'danger' : ''}" id="confirm-yes">${escapeHtml(confirmText)}</button>
+        <button class="btn" id="confirm-no">${ask ? 'Нет' : 'Отмена'}</button>
+        <button class="btn ${danger && !ask ? 'danger' : ''}" id="confirm-yes">${escapeHtml(confirmText)}</button>
       </div>`;
     $('modal').classList.remove('hidden');
     const done = (answer) => {
       confirmDismiss = null;
       $('modal').classList.add('hidden');
+      if (state.modalReturnFocus && state.modalReturnFocus.focus) {
+        try { state.modalReturnFocus.focus(); } catch (err) { /* element gone */ }
+      }
+      state.modalReturnFocus = null;
       $('modal').onclick = (e) => { if (e.target === $('modal')) $('modal').classList.add('hidden'); };
       resolve(answer);
     };
@@ -5034,6 +5110,27 @@ function showGlossaryTermForm(opts) {
     const aliases = $('gl-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
     if (!term) { toast('Укажите термин'); return; }
     if (!aliases.length) { toast('Нужен хотя бы один вариант'); return; }
+    // Adding a term that is already there would silently replace its variants;
+    // the same goes for a variant already heard as another term. Ask first.
+    const terms = (state.glossary && state.glossary.terms) || [];
+    const clash = terms.find(t => t.term === term && t.term !== original);
+    if (clash && !(await showConfirm(
+      `Термин «${term}» уже есть в словаре. Заменить его варианты на введённые?`,
+      { ask: true, confirmText: 'Заменить' }))) return;
+    const taken = new Map();
+    for (const t of terms) {
+      if (t.term === term || t.term === original) continue;
+      for (const a of (t.aliases || [])) taken.set(a.toLowerCase(), t.term);
+    }
+    const busy = aliases.filter(a => taken.has(a.toLowerCase()));
+    if (busy.length && !(await showConfirm(
+      `Вариант «${busy.join('», «')}» уже слышится как другой термин. Забрать его себе?`,
+      { ask: true, confirmText: 'Забрать' }))) {
+      const keep = aliases.filter(a => !taken.has(a.toLowerCase()));
+      if (!keep.length) { toast('Все варианты уже заняты'); return; }
+      $('gl-aliases').value = keep.join(', ');
+      return;
+    }
     // Save the new term first; delete the old name only after that succeeded,
     // so a failed save never leaves the term deleted.
     const res = await fetch('/api/glossary/term', {
