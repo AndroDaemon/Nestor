@@ -1179,6 +1179,10 @@ def load_or_decode(
     return waveform, False
 
 
+VP_CORE_SHARE = 0.7  # keep this share of the utterances closest to the draft
+VP_CORE_MIN = 2      # ... but never fewer than this many
+
+
 def _voiceprint_long_labels(recording: Recording) -> set:
     """Labels owning at least one segment long enough to build a voice."""
     return {
@@ -1187,8 +1191,49 @@ def _voiceprint_long_labels(recording: Recording) -> set:
     }
 
 
+def _robust_core_mean(vectors) -> tuple:
+    """Mean of the utterance embeddings closest to their own centroid.
+
+    A voiceprint built as the plain average of *all* of a speaker's segments is
+    dragged towards whoever else got caught in the cluster: one overlapped, noisy
+    or mis-assigned line is enough to move the portrait. So we take a draft
+    centroid from everything, keep only the ``VP_CORE_SHARE`` closest utterances
+    (at least ``VP_CORE_MIN`` of them) and average that core. Returns
+    ``(vector, kept, total)``; ``vector`` is ``None`` when there is nothing to
+    average, and ``total`` is the number of usable utterances.
+    """
+    rows = [
+        np.asarray(vector, dtype=np.float64)
+        for vector in vectors or []
+        if vector is not None
+    ]
+    if not rows:
+        return None, 0, 0
+    total = len(rows)
+    matrix = np.asarray(rows, dtype=np.float64)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms <= 0.0] = 1.0
+    matrix = matrix / norms
+    if total == 1:
+        return matrix[0], 1, 1
+    draft = matrix.mean(axis=0)
+    draft_norm = np.linalg.norm(draft)
+    draft = draft / (draft_norm if draft_norm > 0 else 1.0)
+    similarities = matrix @ draft
+    keep = min(total, max(VP_CORE_MIN, int(round(total * VP_CORE_SHARE))))
+    core = matrix[np.argsort(-similarities)[:keep]]
+    centroid = core.mean(axis=0)
+    centroid_norm = np.linalg.norm(centroid)
+    centroid = centroid / (centroid_norm if centroid_norm > 0 else 1.0)
+    return centroid, int(keep), total
+
+
 def _voiceprint_vector(
-    lib: Library, record_id: str, recording: Recording, speaker: str
+    lib: Library,
+    record_id: str,
+    recording: Recording,
+    speaker: str,
+    segment_ids: Optional[list] = None,
 ) -> tuple:
     """Cluster embedding of one speaker, ``(vector, reason)``.
 
@@ -1200,6 +1245,14 @@ def _voiceprint_vector(
     "missing" (no such speaker), "too_short" (all his segments are shorter
     than the embedding minimum), "no_audio" (nothing to recompute from).
 
+    The portrait is not the plain mean of the whole cluster: a robust core is
+    kept (see :func:`_robust_core_mean`), so a noisy or mis-assigned line does
+    not drag the saved voice. When the caller passes ``segment_ids`` (the user
+    explicitly picked the samples), only those segments are used and no core
+    is applied - an explicit choice is trusted as is. When a ``segment_ids``
+    list leaves no usable segment the whole cluster is used instead, so a bad
+    request never loses the voice.
+
     A rebuild embeds only the segments of the requested speaker. Recomputing
     the whole recording is quadratic to its length (a one-hour file spent
     ~45 s in decode + embedding) while the vector of one speaker needs only
@@ -1209,6 +1262,7 @@ def _voiceprint_vector(
     """
     from ..speaker_embed import (
         cluster_vectors,
+        embed_segments,
         load_record_embeddings,
     )
 
@@ -1218,12 +1272,33 @@ def _voiceprint_vector(
     if speaker not in long_labels:
         return None, "too_short"
 
+    wanted = {str(sid) for sid in segment_ids} if segment_ids else None
+    own = [seg for seg in recording.segments if seg.speaker == speaker]
+    if wanted is not None:
+        own = [seg for seg in own if str(getattr(seg, "id", "")) in wanted]
+
+    def _explicit() -> bool:
+        return wanted is not None and bool(own)
+
+    # explicit samples from the cache: the cache stores per-utterance vectors in
+    # segment order (short segments dropped), so we can map them back onto the
+    # chosen segments directly
     clusters, per_segment = load_record_embeddings(lib.embeddings_dir, record_id)
-    if clusters and long_labels <= set(clusters):
+    if clusters and long_labels <= set(clusters) and _explicit():
+        rows = per_segment.get(speaker) or []
+        chosen = _explicit_vectors(recording, speaker, wanted, rows)
+        if chosen:
+            mean = np.asarray(chosen, dtype=np.float64).mean(axis=0)
+            norm = np.linalg.norm(mean)
+            return (mean / (norm if norm > 0 else 1.0)), None
+    if clusters and long_labels <= set(clusters) and not _explicit():
         # a trusting cache always has the label (it covers every long label)
-        if speaker in clusters:
-            return clusters[speaker], None
-        return None, "no_audio"
+        if speaker not in clusters:
+            return None, "no_audio"
+        core, _kept, _total = _robust_core_mean(per_segment.get(speaker))
+        if core is not None:
+            return core, None
+        return clusters[speaker], None
     # no usable cache (old recording, missing, or a pass whose labels no
     # longer match the segments): rebuild just this speaker from the audio
     source = lib.recording_source(recording)
@@ -1231,13 +1306,59 @@ def _voiceprint_vector(
         return None, "no_audio"
     try:
         waveform = decode(source)
-        own = [seg for seg in recording.segments if seg.speaker == speaker]
-        own_clusters, _ = cluster_vectors(
+        if _explicit():
+            # embed the chosen samples one by one: a single pathological region
+            # must not sink the whole portrait (onnxruntime throws on some)
+            vectors = []
+            for seg in own:
+                try:
+                    one = embed_segments(
+                        waveform,
+                        SAMPLE_RATE,
+                        [(seg.start, seg.end)],
+                        min_duration=VP_MIN_SEGMENT_SEC,
+                    )
+                except Exception:  # noqa: BLE001 - skip an unembeddable sample
+                    continue
+                if one and one[0] is not None:
+                    vectors.append(one[0])
+            if vectors:
+                mean = np.asarray(vectors, dtype=np.float64).mean(axis=0)
+                norm = np.linalg.norm(mean)
+                return (mean / (norm if norm > 0 else 1.0)), None
+            own = [seg for seg in recording.segments if seg.speaker == speaker]
+        own_clusters, own_per_segment = cluster_vectors(
             waveform, SAMPLE_RATE, own, min_segment_sec=VP_MIN_SEGMENT_SEC,
         )
     except Exception:  # noqa: BLE001 - broken audio / model failure
         return None, "no_audio"
+    core, _kept, _total = _robust_core_mean(own_per_segment.get(speaker))
+    if core is not None:
+        return core, None
     return own_clusters.get(speaker), None
+
+
+def _explicit_vectors(recording: Recording, speaker: str, wanted: set, rows) -> list:
+    """Cached per-utterance vectors of the chosen segments, in segment order.
+
+    The cache stores one vector per segment *long enough to embed*, in the same
+    order the segments appear, so walking the speaker's long segments and
+    ticking the chosen ones rebuilds the mapping. Segments the cache skipped
+    (too short) have no row and are simply not selectable.
+    """
+    chosen: list = []
+    index = 0
+    for seg in recording.segments:
+        if seg.speaker != speaker:
+            continue
+        if float(seg.end) - float(seg.start) < VP_MIN_SEGMENT_SEC:
+            continue
+        if index >= len(rows):
+            break
+        if str(getattr(seg, "id", "")) in wanted:
+            chosen.append(rows[index])
+        index += 1
+    return chosen
 
 
 def create_app(
@@ -1997,11 +2118,14 @@ def create_app(
     async def add_voiceprint(request: Request) -> Dict[str, object]:
         """Save a speaker's voice from a processed recording.
 
-        Body: ``{name, recording_id, speaker}``. Uses the cached embeddings
+        Body: ``{name, recording_id, speaker}``, optionally ``segment_ids``
+        (the samples the user explicitly selected). Uses the cached embeddings
         (``embeddings/<id>.npz``); without a cache it falls back to decoding
         the source audio and re-embedding only that speaker's segments - a
         partial result (never the whole recording), so saving stays quick
-        even for hour-long files. decoding happens off the event loop.
+        even for hour-long files. The saved portrait is the robust core of the
+        speaker's utterances unless explicit samples were given. Decoding
+        happens off the event loop.
         """
         try:
             body = await request.json()
@@ -2012,6 +2136,12 @@ def create_app(
         name = str(body.get("name") or "").strip()
         record_id = str(body.get("recording_id") or "").strip()
         speaker = str(body.get("speaker") or "").strip()
+        raw_ids = body.get("segment_ids")
+        segment_ids = (
+            [str(value) for value in raw_ids]
+            if isinstance(raw_ids, (list, tuple))
+            else None
+        )
         if not name:
             raise HTTPException(status_code=400, detail="Укажите имя спикера")
         if not record_id or not speaker:
@@ -2032,7 +2162,7 @@ def create_app(
         # decode + embedding are heavy CPU work; keep them off the event
         # loop so the UI stays responsive while the vector is being built
         vector, reason = await run_in_threadpool(
-            _voiceprint_vector, lib, record_id, recording, speaker
+            _voiceprint_vector, lib, record_id, recording, speaker, segment_ids
         )
         if vector is None:
             if reason == "too_short":
@@ -2063,7 +2193,11 @@ def create_app(
             source_recording_id=record_id,
             duration_sec=duration,
         )
-        lib.log(f"voiceprint saved: {meta.display_name} (from {recording.filename}, {speaker})")
+        chosen = f", {len(segment_ids)} sample(s)" if segment_ids else ""
+        lib.log(
+            f"voiceprint saved: {meta.display_name} "
+            f"(from {recording.filename}, {speaker}{chosen})"
+        )
         return {"saved": meta.display_name, "slug": meta.slug}
 
     @app.delete("/api/voiceprints/{slug}")

@@ -712,8 +712,14 @@
   /* выделение реплик (Shift/Ctrl+клик): действия — в панели над списком */
   .seg.selected { background: rgba(9, 105, 218, .14); border-color: var(--accent); }
   .seg.selected:hover { background: rgba(9, 105, 218, .20); }
-  /* панель действий над выделенными репликами */
-  .sel-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+  /* панель действий над выделенными репликами (липкая: не уходит при прокрутке) */
+  .sel-bar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 6px; padding: 6px 0;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted);
+  }
   .sel-bar .sel-count { color: var(--text); }
   .sel-bar .sel-hint { color: var(--muted); opacity: .8; }
   .sel-bar button {
@@ -2145,7 +2151,11 @@ function renderChips() {
       if (twins.length) {
         return showVoiceMergeChoice(btn, id, name, twins);
       }
-      await saveVoiceFor(id, name, btn);    };
+      // if the user picked sample utterances of exactly this speaker, save the
+      // voice from those fragments only (explicit samples, no outlier trimming)
+      const picked = selectedSegments().filter(s => s.speaker === id).map(s => s.id);
+      await saveVoiceFor(id, name, btn, picked.length ? picked : undefined);
+    };
     chip.appendChild(btn);
     // "merge into..." - fold this label into another speaker of the recording
     if (speakers.length > 1) {
@@ -2350,7 +2360,8 @@ async function renameSpeakerEverywhere(btn, oldName) {
   input.onkeydown = (e) => { if (e.key === 'Enter') commit(); };
 }
 
-async function saveVoiceFor(id, name, btn) {
+async function saveVoiceFor(id, name, btn, segmentIds) {
+  const samples = Array.isArray(segmentIds) ? segmentIds.filter(Boolean) : [];
   const savingState = () => {
     if (!btn) return;
     btn.disabled = true;
@@ -2365,7 +2376,9 @@ async function saveVoiceFor(id, name, btn) {
     else if (failed) { btn.disabled = false; btn.textContent = '🎙'; }
   };
   savingState();
-  toast(`Запоминаю голос «${name}»…`);
+  toast(samples.length
+    ? `Запоминаю голос «${name}» по ${samples.length} ${plural(samples.length, 'реплике', 'репликам', 'репликам')}…`
+    : `Запоминаю голос «${name}»…`);
   // Without a cached embedding the server decodes the source audio first:
   // for a long recording that is up to half a minute with no other
   // feedback, so after a short pause say explicitly that it is working.
@@ -2373,17 +2386,21 @@ async function saveVoiceFor(id, name, btn) {
     toast('Голос запоминается — разбирается длинная запись, это займёт до полуминуты');
   }, 2500);
   try {
+    const payload = { name, recording_id: state.current.id, speaker: id };
+    if (samples.length) payload.segment_ids = samples;
     const res = await fetch('/api/voiceprints', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, recording_id: state.current.id, speaker: id }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
     clearTimeout(warnTimer);
     state.savedVoices[id] = true;
     if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓'; }
-    toast(`Голос «${name}» сохранён`);
+    toast(samples.length
+      ? `Голос «${name}» сохранён по N выбранным репликам`.replace('N', samples.length)
+      : `Голос «${name}» сохранён`);
     loadVoiceprints();
   } catch (err) {
     clearTimeout(warnTimer);
