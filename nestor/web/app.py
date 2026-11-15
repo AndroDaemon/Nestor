@@ -190,16 +190,50 @@ def install_access_guard(app: FastAPI, token: str) -> None:
 
 
 # --------------------------------------------------------------------- helpers
-def compute_peaks(waveform: np.ndarray, buckets: int = 1200) -> List[float]:
+# --- waveform points for the player -----------------------------------------
+# A fixed bucket count smeared long takes: one hour of audio got 3.2 s per
+# point, so a zoomed-in view was blocky and short turns sat inside a single
+# pixel. Tying the count to the duration keeps the shape honest at any zoom.
+# The ceiling is a safety net for absurd input only: capping earlier (100 min)
+# would quietly bring the old coarseness back on exactly the long files that
+# prompted the change.
+PEAKS_PER_SECOND = 4.0
+PEAKS_MIN = 1200
+PEAKS_MAX = 288_000
+
+
+def peaks_bucket_count(duration_sec: float) -> int:
+    """How many waveform points a recording of this length should have."""
+    if duration_sec <= 0:
+        return PEAKS_MIN
+    return int(min(PEAKS_MAX, max(PEAKS_MIN, round(duration_sec * PEAKS_PER_SECOND))))
+
+
+# 4 M samples per pass: the temporary is ~16 MB whatever the recording length,
+# so a five-hour take does not need a second full-size copy just for |x|.
+_PEAKS_BLOCK = 1 << 22
+
+
+def compute_peaks(waveform: np.ndarray, buckets: Optional[int] = None) -> List[float]:
     """Downsample a waveform into normalised peak values for the player."""
     if waveform.size == 0:
         return []
+    if buckets is None:
+        buckets = peaks_bucket_count(waveform.size / float(SAMPLE_RATE))
     buckets = max(1, min(buckets, waveform.size))
     edges = np.linspace(0, waveform.size, buckets + 1).astype(np.int64)
-    # One vectorised pass: max(|waveform|) per bucket. buckets <= waveform.size
-    # keeps every segment non-empty, so reduceat is safe here.
-    peaks = np.maximum.reduceat(np.abs(waveform), edges[:-1])
-    maximum = peaks.max() if peaks.size else 1.0
+    # max(|waveform|) per bucket, in bounded passes. buckets <= waveform.size
+    # keeps every bucket non-empty, so reduceat is safe here.
+    peaks = np.empty(buckets, dtype=np.float32)
+    first = 0
+    while first < buckets:
+        low = int(edges[first])
+        last = int(np.searchsorted(edges, low + _PEAKS_BLOCK, side="right")) - 1
+        last = min(buckets, max(first + 1, last))
+        segment = np.abs(waveform[low : int(edges[last])])
+        peaks[first:last] = np.maximum.reduceat(segment, edges[first:last] - low)
+        first = last
+    maximum = float(peaks.max()) if peaks.size else 1.0
     if maximum > 0:
         peaks = peaks / maximum
     return [round(float(value), 4) for value in peaks]
@@ -1179,6 +1213,33 @@ def load_or_decode(
     return waveform, False
 
 
+def rebuild_peaks(library: "Library", recording: "Recording") -> List[float]:
+    """Recompute a recording's waveform points from its cached 16 kHz wav.
+
+    Recordings made before the adaptive bucket count carry peaks from the old
+    fixed 1200-point scheme; those make the zoomed waveform blocky, so a stale
+    cache is replaced as soon as it is read. Returns ``[]`` when the wav cache
+    is missing — peaks are cosmetic and must never fail a request.
+    """
+    cache = waveform_cache_path(library, recording.id)
+    if not cache.exists():
+        return []
+    try:
+        import soundfile as sf
+
+        waveform, sample_rate = sf.read(cache, dtype="float32", always_2d=False)
+    except Exception:  # noqa: BLE001 - peaks are cosmetic
+        return []
+    if sample_rate != SAMPLE_RATE or waveform.ndim != 1 or waveform.size == 0:
+        return []
+    peaks = compute_peaks(waveform)
+    try:
+        library.save_peaks(recording.id, peaks)
+    except OSError:
+        pass
+    return peaks
+
+
 VP_CORE_SHARE = 0.7  # keep this share of the utterances closest to the draft
 VP_CORE_MIN = 2      # ... but never fewer than this many
 
@@ -1928,7 +1989,13 @@ def create_app(
 
     @app.get("/api/recordings/{record_id}/peaks")
     def recording_peaks(record_id: str) -> Dict[str, object]:
-        return {"peaks": lib.load_peaks(record_id)}
+        peaks = lib.load_peaks(record_id)
+        recording = lib.load(record_id)
+        if recording is not None:
+            expected = peaks_bucket_count(recording.duration or 0.0)
+            if len(peaks) != expected:
+                peaks = rebuild_peaks(lib, recording) or peaks
+        return {"peaks": peaks}
 
     @app.get("/api/recordings/{record_id}/export/{fmt}")
     def recording_export(record_id: str, fmt: str) -> Response:

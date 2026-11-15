@@ -198,7 +198,22 @@ def get_duration(path: Union[str, Path]) -> float:
         container.close()
 
 
-def normalize_rms(waveform: np.ndarray, target_dbfs: float = -20.0) -> np.ndarray:
+def _rms(waveform: np.ndarray, block: int = 1 << 16) -> float:
+    """Root mean square, accumulated in float64 without a full-length copy."""
+    if waveform.size == 0:
+        return 0.0
+    total = 0.0
+    for start in range(0, waveform.size, block):
+        chunk = np.asarray(waveform[start:start + block], dtype=np.float64)
+        total += float(np.dot(chunk, chunk))
+    return float(np.sqrt(total / waveform.size))
+
+
+def normalize_rms(
+    waveform: np.ndarray,
+    target_dbfs: float = -20.0,
+    copy: bool = True,
+) -> np.ndarray:
     """
     Optional: light RMS normalization (NOT called automatically in decode_to_mono_16k).
 
@@ -208,18 +223,29 @@ def normalize_rms(waveform: np.ndarray, target_dbfs: float = -20.0) -> np.ndarra
         1-D float32 array.
     target_dbfs:
         Target RMS level in dBFS (default -20 dBFS, i.e. 0.1 amplitude).
+    copy:
+        With ``False`` the scaling and clipping happen inside ``waveform``
+        itself, so no extra full-length array is allocated. The caller must
+        own the buffer and be done with the original samples.
 
     Returns
     -------
     np.ndarray
         Normalized waveform, clipped to [-1.0, 1.0], float32.
     """
-    rms = np.sqrt(np.mean(waveform**2))
-    if rms > 0:
-        target_rms = 10 ** (target_dbfs / 20.0)
-        waveform = waveform * (target_rms / rms)
-        waveform = np.clip(waveform, -1.0, 1.0)
-    return waveform.astype(np.float32)
+    if waveform.size == 0:
+        return waveform.astype(np.float32, copy=copy)
+    rms = _rms(waveform)
+    if rms <= 0.0:
+        return waveform.astype(np.float32, copy=copy)
+    scale = 10 ** (target_dbfs / 20.0) / rms
+    if copy:
+        result = np.asarray(waveform, dtype=np.float32) * np.float32(scale)
+    else:
+        result = waveform
+        np.multiply(waveform, scale, out=result)
+    np.clip(result, -1.0, 1.0, out=result)
+    return result.astype(np.float32, copy=False)
 
 
 # ---------------------------------------------------------------------------
@@ -254,35 +280,85 @@ def _highpass_taps(cutoff: float, sample_rate: int) -> np.ndarray:
     return taps * np.blackman(numtaps)
 
 
-def _fft_convolve(taps: np.ndarray, signal: np.ndarray) -> np.ndarray:
-    """Full linear convolution of ``taps`` with ``signal`` via overlap-add.
+def _fft_convolve(
+    taps: np.ndarray,
+    signal: np.ndarray,
+    out: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Zero-phase convolution of ``taps`` with ``signal``, aligned to ``signal``.
 
-    Chunked so the FFT workspace stays bounded no matter how long the
-    recording is.
+    Overlap-add with a small carry buffer, so the ``n + m - 1`` intermediate
+    array is never allocated: a five-hour recording (303 M samples) would
+    otherwise need 2.4 GB in float64 on top of the waveform itself. Results are
+    written as float32 straight into ``out`` (a fresh array when omitted).
+
+    ``out`` may be the ``signal`` buffer itself. That is safe here: the chunk
+    is copied to float64 *before* any write, every write lands in samples that
+    were already read, and the overlap-add adds to positions a previous block
+    has already produced.
     """
     n = int(signal.size)
     m = int(taps.size)
-    out_len = n + m - 1
+    delay = (m - 1) // 2
+    if out is None:
+        out = np.zeros(n, dtype=np.float32)
     nfft = 1 << int(np.ceil(np.log2(_HIGHPASS_BLOCK + m - 1)))
     spectrum = np.fft.rfft(taps, nfft)
-    out = np.zeros(out_len, dtype=np.float64)
-    for start in range(0, n, _HIGHPASS_BLOCK):
-        chunk = np.asarray(signal[start:start + _HIGHPASS_BLOCK], dtype=np.float64)
+    carry = np.zeros(m - 1, dtype=np.float64)
+    # Walk ``delay`` samples past the end: the filter is zero-phase, so the
+    # last output samples come from the convolution tail. Without this tail the
+    # final 128 ms would keep stale values (or zeros) and signals shorter than
+    # the group delay would come out empty.
+    total = n + delay
+    chunk = np.zeros(_HIGHPASS_BLOCK, dtype=np.float64)
+    for start in range(0, total, _HIGHPASS_BLOCK):
+        valid = min(_HIGHPASS_BLOCK, total - start)
+        take = min(valid, n - start) if start < n else 0
+        if take > 0:
+            chunk[:take] = signal[start:start + take]
+        if take < _HIGHPASS_BLOCK:
+            chunk[take:] = 0.0
         block = np.fft.irfft(np.fft.rfft(chunk, nfft) * spectrum, nfft)
-        seg = block[: max(0, out_len - start)]
-        out[start:start + seg.size] += seg
+        head = block[:valid].copy()
+        overlap = min(valid, carry.size)
+        if overlap:
+            head[:overlap] += carry[:overlap]
+        if valid == _HIGHPASS_BLOCK:
+            carry[:] = block[valid:valid + carry.size]
+        # the aligned signal is y[i] = conv[i + delay]; keep only what exists
+        lo = start - delay
+        skip = max(0, -lo)
+        dst = lo + skip
+        length = min(valid - skip, n - dst)
+        if length > 0:
+            # Each sample is produced exactly once (block ranges are disjoint),
+            # so this is an assignment, not an accumulation: with ``out`` being
+            # the caller's own buffer the old samples must be overwritten.
+            out[dst:dst + length] = head[skip:skip + length]
     return out
 
 
-def highpass_filter(waveform: np.ndarray, sample_rate: int, cutoff: float = HIGHPASS_HZ) -> np.ndarray:
-    """Remove rumble below ``cutoff`` with a zero-phase linear-phase FIR."""
+def highpass_filter(
+    waveform: np.ndarray,
+    sample_rate: int,
+    cutoff: float = HIGHPASS_HZ,
+    out: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Remove rumble below ``cutoff`` with a zero-phase linear-phase FIR.
+
+    Pass ``out=waveform`` (float32, writable, same length) to filter in place
+    and avoid a second full-length buffer.
+    """
     if waveform.size == 0:
         return waveform.astype(np.float32, copy=False)
+    if out is not None and (
+        out.size != waveform.size
+        or out.dtype != np.float32
+        or not out.flags.writeable
+    ):
+        out = None
     taps = _highpass_taps(cutoff, sample_rate)
-    filtered = _fft_convolve(taps, waveform)
-    delay = (taps.size - 1) // 2
-    aligned = filtered[delay:delay + waveform.size]
-    return aligned.astype(np.float32)
+    return _fft_convolve(taps, waveform, out=out)
 
 
 def speech_level_db(waveform: np.ndarray, sample_rate: int) -> float:
@@ -295,8 +371,18 @@ def speech_level_db(waveform: np.ndarray, sample_rate: int) -> float:
     n_frames = len(waveform) // frame
     if n_frames == 0:
         return -120.0
-    frames = waveform[: n_frames * frame].reshape(n_frames, frame)
-    frame_rms = np.sqrt(np.mean(frames**2, axis=1))
+    # Frame RMS without materialising ``frames ** 2`` (a full-length array on a
+    # multi-hour recording). Rows are reduced in chunks straight to a small
+    # per-frame vector.
+    frame_rms = np.empty(n_frames, dtype=np.float32)
+    chunk_frames = max(1, (1 << 16) // frame)
+    for first in range(0, n_frames, chunk_frames):
+        last = min(n_frames, first + chunk_frames)
+        block = np.asarray(
+            waveform[first * frame:last * frame], dtype=np.float32
+        ).reshape(last - first, frame)
+        energy = np.einsum("ij,ij->i", block, block, dtype=np.float64)
+        frame_rms[first:last] = np.sqrt(energy / frame)
     voiced = frame_rms[frame_rms > 0]
     if voiced.size == 0:
         return -120.0
@@ -306,23 +392,33 @@ def speech_level_db(waveform: np.ndarray, sample_rate: int) -> float:
     return 20.0 * float(np.log10(level))
 
 
-def enhance_speech(waveform: np.ndarray, sample_rate: int) -> tuple:
+def enhance_speech(
+    waveform: np.ndarray,
+    sample_rate: int,
+    inplace: bool = False,
+) -> tuple:
     """Highpass + level normalization, the two filters Sloveya applies.
 
     Returns ``(waveform, level_db, mode)`` where mode is ``"loud"``, ``"boost"``
     or ``"skip"`` (already loud enough).
+
+    ``inplace=True`` filters the float32 buffer in place: a five-hour recording
+    then needs one full-length array instead of three. Anything that is not a
+    writable float32 array quietly takes the copying path.
     """
     if waveform.size == 0:
         return waveform, -120.0, "skip"
 
-    filtered = highpass_filter(waveform, sample_rate)
+    reuse = bool(inplace) and waveform.dtype == np.float32 and waveform.flags.writeable
+    filtered = highpass_filter(waveform, sample_rate, out=waveform if reuse else None)
     level = speech_level_db(filtered, sample_rate)
+    keep = not reuse
 
     if level < NORM_TRIGGER_DB:
         # Quiet recording (phone, dictaphone): lift speech to -18 dBFS.
-        return normalize_rms(filtered, target_dbfs=LOUD_TARGET_DBFS), level, "loud"
+        return normalize_rms(filtered, target_dbfs=LOUD_TARGET_DBFS, copy=keep), level, "loud"
     if level < -12.0:
         # Reasonable but quiet-ish: a gentle lift, nothing forced.
-        return normalize_rms(filtered, target_dbfs=BOOST_TARGET_DBFS), level, "boost"
+        return normalize_rms(filtered, target_dbfs=BOOST_TARGET_DBFS, copy=keep), level, "boost"
     # Already healthy: keep the filtered waveform untouched.
     return filtered, level, "skip"

@@ -3708,20 +3708,35 @@ function drawWave() {
     }
   }
 
-  // waveform: the server's 1200 buckets cover the whole take; in a zoomed
-  // window each pixel aggregates (max) the buckets it covers, so the shape
-  // stays honest at any zoom
+  // waveform: the server sends ~4 points per second of recording, so the
+  // shape stays fine-grained at any zoom (a fixed 1200 points used to smear
+  // hour-long takes into 3 s blocks)
   if (peaks.length) {
     ctx.fillStyle = '#3d3d3d';
     const mid = h / 2;
     const first = Math.floor((vs / duration) * peaks.length);
     const last = Math.ceil((ve / duration) * peaks.length);
     const visible = Math.max(1, last - first);
-    const pxW = Math.max(1, w / visible);  // one bucket's width on screen
-    for (let p = first; p < last && p < peaks.length; p++) {
-      const x = ((p - first) / visible) * w;
-      const amp = peaks[p] * (mid - 8);
-      ctx.fillRect(x, mid - amp, Math.max(1, pxW), amp * 2 || 1);
+    if (visible <= w) {
+      const pxW = Math.max(1, w / visible);  // one bucket's width on screen
+      for (let p = first; p < last && p < peaks.length; p++) {
+        const x = ((p - first) / visible) * w;
+        const amp = peaks[p] * (mid - 8);
+        ctx.fillRect(x, mid - amp, Math.max(1, pxW), amp * 2 || 1);
+      }
+    } else {
+      // точек больше, чем пикселей: в каждой колонке берём максимум,
+      // иначе волна рассыпается в шум из одиночных отсчётов
+      const cols = Math.max(1, Math.ceil(w));
+      const step = visible / cols;
+      for (let c = 0; c < cols; c++) {
+        const p0 = first + Math.floor(c * step);
+        const p1 = Math.min(peaks.length, first + Math.floor((c + 1) * step));
+        let amp = 0;
+        for (let p = p0; p < p1; p++) if (peaks[p] > amp) amp = peaks[p];
+        const hh = amp * (mid - 8);
+        ctx.fillRect(c, mid - hh, 1, hh * 2 || 1);
+      }
     }
   }
 
@@ -3744,10 +3759,29 @@ function drawWave() {
   }
 }
 
+/* Clicking the wave snaps to the nearest *turn boundary* within a few pixels.
+   On a long take one pixel is several seconds wide, so a plain seek landed in
+   a neighbouring turn and looked like the table and the audio disagreed.
+   Far from any boundary the exact position is kept, so seeking inside a long
+   monologue still works. */
 $('wave').onclick = (e) => {
   const rect = e.target.getBoundingClientRect();
   const [vs, ve] = viewWindow();
-  seek(vs + ((e.clientX - rect.left) / rect.width) * (ve - vs));
+  const span = ve - vs;
+  const t = vs + ((e.clientX - rect.left) / rect.width) * span;
+  const perPx = span / Math.max(1, rect.width);
+  const tolerance = Math.max(0.75, perPx * 6);   // 6 px, but never under 0.75 s
+  let target = t;
+  if (state.current) {
+    let bestDist = Infinity, bestEdge = t;
+    for (const seg of state.current.segments) {
+      const dStart = Math.abs(t - seg.start), dEnd = Math.abs(t - seg.end);
+      if (dStart < bestDist) { bestDist = dStart; bestEdge = seg.start; }
+      if (dEnd < bestDist) { bestDist = dEnd; bestEdge = seg.end; }
+    }
+    if (bestDist <= tolerance) target = bestEdge;
+  }
+  seek(target);
 };
 
 /* Zoom & pan: Ctrl+wheel zooms under the cursor, plain wheel scrolls,

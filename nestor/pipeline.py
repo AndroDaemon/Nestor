@@ -198,13 +198,21 @@ def process_file(
     stage("decode", 0.02)
     if waveform is None:
         waveform = audio.decode(input_path)
+        decoded_here = True
+    else:
+        decoded_here = False
     total_duration = audio.duration(waveform)
     report(f"  {total_duration:.1f}s of audio at {SAMPLE_RATE} Hz mono")
 
     if config.audio_enhance and waveform.size:
         from .audio_io import enhance_speech
 
-        waveform, level_db, mode = enhance_speech(waveform, SAMPLE_RATE)
+        # Filter in place only for a waveform this run decoded itself: a buffer
+        # handed in by the caller must survive the call. Saves one full-length
+        # copy, which is what made multi-hour files run out of memory.
+        waveform, level_db, mode = enhance_speech(
+            waveform, SAMPLE_RATE, inplace=decoded_here
+        )
         report(f"  audio enhanced: speech level {level_db:.1f} dB ({mode})")
 
     if cancelled():

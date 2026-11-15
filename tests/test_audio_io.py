@@ -104,6 +104,84 @@ def test_normalize_rms():
     assert abs(rms - target_rms) < 0.01
 
 
+def _direct_highpass(x: np.ndarray, sr: int = 16000) -> np.ndarray:
+    """Reference: full linear convolution, then drop the group delay."""
+    import nestor.audio_io as audio_io
+
+    taps = audio_io._highpass_taps(audio_io.HIGHPASS_HZ, sr)
+    delay = (taps.size - 1) // 2
+    full = np.convolve(np.asarray(x, dtype=np.float64), taps, mode="full")
+    return full[delay:delay + x.size].astype(np.float32)
+
+
+@pytest.mark.parametrize("n", [1, 100, 2048, 2049, 5000, 70000])
+def test_highpass_matches_direct_convolution(n: int):
+    """FFT overlap-add must equal the textbook convolution, tail included.
+
+    Signals shorter than the group delay (2048 samples) and lengths just over
+    one block used to lose the tail: the last 128 ms kept stale values.
+    """
+    rng = np.random.default_rng(7)
+    x = rng.normal(0, 0.1, size=n).astype(np.float32)
+
+    y = highpass_filter(x, 16000)
+
+    assert y.shape == x.shape
+    assert y.dtype == np.float32
+    assert np.max(np.abs(y - _direct_highpass(x))) < 1e-6
+
+
+def test_highpass_inplace_matches_copy():
+    rng = np.random.default_rng(11)
+    base = rng.normal(0, 0.1, size=50000).astype(np.float32)
+    x = base.copy()
+
+    y = highpass_filter(x, 16000, out=x)
+
+    assert y is x
+    assert np.max(np.abs(y - highpass_filter(base, 16000))) < 1e-6
+
+
+def test_highpass_ignores_unsuitable_out():
+    """A read-only or wrong-dtype buffer is dropped instead of crashing."""
+    rng = np.random.default_rng(3)
+    x = rng.normal(0, 0.1, size=5000).astype(np.float32)
+    other = np.zeros(5000, dtype=np.float64)
+
+    y = highpass_filter(x, 16000, out=other)
+
+    assert y is not x and y.dtype == np.float32
+    assert not other.any()
+    assert np.allclose(y, highpass_filter(x, 16000))
+
+
+def test_normalize_rms_inplace():
+    rng = np.random.default_rng(5)
+    base = rng.normal(0, 0.01, size=8000).astype(np.float32)
+    x = base.copy()
+
+    y = normalize_rms(x, target_dbfs=-20.0, copy=False)
+
+    assert y is x
+    assert np.array_equal(y, normalize_rms(base, target_dbfs=-20.0))
+    assert not np.array_equal(x, base)
+
+
+def test_enhance_speech_inplace_matches_copy():
+    sr = 16000
+    t = np.arange(sr) / sr
+    base = (0.005 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)
+    x = base.copy()
+
+    y, level_db, mode = enhance_speech(x, sr, inplace=True)
+    ref, ref_level, ref_mode = enhance_speech(base.copy(), sr)
+
+    assert y is x
+    assert mode == ref_mode
+    assert abs(level_db - ref_level) < 1e-9
+    assert np.max(np.abs(y - ref)) < 1e-6
+
+
 def test_decode_synthetic_sine(tmp_path):
     """
     Generate a 1-second 440 Hz sine at 44.1 kHz stereo via soundfile,
