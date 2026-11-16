@@ -195,3 +195,39 @@ def test_pipeline_merges_duplicate_speakers(tmp_path, monkeypatch):
         progress=None,
     )
     assert kept.speakers == ["SPEAKER_00", "SPEAKER_01"]
+
+
+def test_reuse_waveform_filters_in_place(tmp_path, monkeypatch):
+    """Handing ownership over lets the pipeline enhance in place.
+
+    Two full-length copies of a multi-hour recording are what made those files
+    die with ``bad allocation``: one held by the web layer, one produced by the
+    filter. ``reuse_waveform=True`` says the caller will not read the buffer
+    again, so it must be filtered in place; a borrowed buffer stays untouched.
+    """
+    if not SAMPLE.exists():
+        import pytest
+
+        pytest.skip("sample audio is missing")
+
+    monkeypatch.setattr(pipeline_module, "SherpaOnnxAsr", FakeAsr)
+    monkeypatch.setattr(pipeline_module, "ensure_gigaam_punct", lambda *a, **k: {})
+
+    config = Config(
+        diarize=False,
+        audio_enhance=True,
+        output_dir=tmp_path,
+        formats=["txt"],
+    )
+
+    owned = np.full(16000, 0.001, dtype=np.float32)
+    before = owned.copy()
+    pipeline_module.process_file(
+        config, SAMPLE, waveform=owned, reuse_waveform=True, progress=None
+    )
+    assert not np.array_equal(owned, before), "owned buffer must be filtered in place"
+
+    borrowed = np.full(16000, 0.001, dtype=np.float32)
+    before = borrowed.copy()
+    pipeline_module.process_file(config, SAMPLE, waveform=borrowed, progress=None)
+    assert np.array_equal(borrowed, before), "borrowed buffer must survive the call"

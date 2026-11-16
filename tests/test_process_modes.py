@@ -768,7 +768,7 @@ def test_save_put_rejected_while_job_running(app, monkeypatch):
 def _blocking_process_file():
     """Stands in for the pipeline: runs until the job is cancelled."""
 
-    def blocking(config, source, on_stage=None, waveform=None, cancel=None, progress=None):
+    def blocking(config, source, on_stage=None, waveform=None, cancel=None, progress=None, **kwargs):
         if on_stage is not None:
             on_stage("transcription", 0.3)
         while not (cancel and cancel()):
@@ -922,7 +922,7 @@ def test_failed_job_resets_progress(tmp_path, monkeypatch):
         lambda p, on_progress=None: np.zeros(16000 * 4, dtype=np.float32),
     )
 
-    def exploding(config, source, on_stage=None, waveform=None, cancel=None, progress=None):
+    def exploding(config, source, on_stage=None, waveform=None, cancel=None, progress=None, **kwargs):
         if on_stage is not None:
             on_stage("transcription", 0.4)
         raise RuntimeError("boom")

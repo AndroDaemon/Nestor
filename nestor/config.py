@@ -46,6 +46,13 @@ class Config:
     diar_threshold: float = 0.5
     diar_min_duration_on: float = 0.5
     diar_min_duration_off: float = 0.0
+    # Diarize long recordings in overlapping blocks. sherpa-onnx copies the
+    # whole waveform into its own buffer, so a single call on a five-hour file
+    # costs a second full-length copy (~1.2 GB) on top of the Python one, which
+    # is what killed such files with `bad allocation`. Block length is in
+    # seconds; 0 disables blocking (single call, higher memory).
+    diar_block_seconds: float = 1200.0
+    diar_block_overlap: float = 60.0
 
     # Voiceprints (speaker identification against a local library)
     match_voiceprints: bool = False

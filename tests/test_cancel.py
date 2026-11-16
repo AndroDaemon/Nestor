@@ -109,7 +109,7 @@ def test_cancel_during_transcription_keeps_partial_text(tmp_path, monkeypatch):
 def _blocking_process_file(calls):
     """Stands in for the pipeline: runs until the job is cancelled."""
 
-    def blocking(config, source, on_stage=None, waveform=None, cancel=None, progress=None):
+    def blocking(config, source, on_stage=None, waveform=None, cancel=None, progress=None, **kwargs):
         calls.append(Path(source).name)
         if on_stage is not None:
             on_stage("transcription", 0.3)

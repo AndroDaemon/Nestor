@@ -29,14 +29,34 @@ def decode(
     return decode_to_mono_16k(path, on_progress=on_progress)
 
 
-def write_wav(path: Union[str, Path], waveform: np.ndarray, sample_rate: int = SAMPLE_RATE) -> Path:
-    """Write a mono float32 waveform to a 16-bit WAV file."""
+def write_wav(
+    path: Union[str, Path],
+    waveform: np.ndarray,
+    sample_rate: int = SAMPLE_RATE,
+    block: int = 1 << 22,
+) -> Path:
+    """Write a mono float32 waveform to a 16-bit WAV file.
+
+    The signal is written in blocks, so clamping into ``[-1, 1]`` never needs a
+    second full-length copy: on a five-hour recording that copy alone is 1.2 GB,
+    which is the difference between fitting in memory and ``bad allocation``.
+    """
     import soundfile as sf
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    clipped = np.clip(waveform, -1.0, 1.0).astype(np.float32)
-    sf.write(str(path), clipped, sample_rate, subtype="PCM_16")
+    samples = np.ascontiguousarray(waveform)
+    total = int(samples.shape[0])
+    with sf.SoundFile(
+        str(path), mode="w", samplerate=sample_rate, channels=1, subtype="PCM_16"
+    ) as handle:
+        for first in range(0, total, block):
+            piece = samples[first : first + block]
+            if piece.size == 0:
+                continue
+            if float(piece.min()) < -1.0 or float(piece.max()) > 1.0:
+                piece = np.clip(piece, -1.0, 1.0)
+            handle.write(piece.astype(np.float32, copy=False))
     return path
 
 

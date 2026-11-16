@@ -49,6 +49,11 @@ SCHEMA: Dict[str, Tuple[str, object]] = {
     "diar_threshold": ("float", (0.0, 1.0)),
     "diar_min_duration_on": ("float", (0.0, 5.0)),
     "diar_min_duration_off": ("float", (0.0, 5.0)),
+    # diarize long recordings in overlapping blocks (0 = one call, high memory):
+    # sherpa-onnx copies the whole waveform, so a single call on a multi-hour
+    # file costs a second full-length buffer and dies with `bad allocation`
+    "diar_block_seconds": ("int", (0, 3600)),
+    "diar_block_overlap": ("int", (0, 600)),
     # rescue pass: re-transcribe silent holes between words
     "rescue_holes": ("bool", None),
     # glossary post-correction: rewrite heard forms ("докер") to canonical
@@ -84,6 +89,8 @@ DEFAULTS: Dict[str, object] = {
     "diar_threshold": 0.5,
     "diar_min_duration_on": 0.5,
     "diar_min_duration_off": 0.0,
+    "diar_block_seconds": 1200,
+    "diar_block_overlap": 60,
     "rescue_holes": True,
     "glossary": False,
     "threads": 0,

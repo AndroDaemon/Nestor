@@ -14,7 +14,7 @@ from .asr_onnx import SherpaOnnxAsr
 from .config import Config
 from .constants import SAMPLE_RATE
 from .cpuinfo import resolve_diar_threads, resolve_threads
-from .diarize import SingleSpeakerDiarizer, _accepts_progress, build_diarizer
+from .diarize import SingleSpeakerDiarizer, _accepts_blocking, _accepts_progress, build_diarizer
 from .models import ensure_gigaam_punct
 from .types import Segment, Transcript, Word
 
@@ -155,6 +155,7 @@ def process_file(
     on_stage: Optional[StageFn] = None,
     waveform: Optional["np.ndarray"] = None,
     cancel: Optional[CancelFn] = None,
+    reuse_waveform: bool = False,
 ) -> Transcript:
     """Transcribe and diarize a single audio file.
 
@@ -177,6 +178,11 @@ def process_file(
         job stops: before the first chunk this raises :class:`JobCancelled`,
         during transcription the already transcribed chunks are kept and the
         transcript comes back partial.
+    reuse_waveform:
+        The caller hands over ownership of ``waveform`` and promises not to
+        read it afterwards. Audio enhancement may then filter the buffer in
+        place instead of allocating a second full-length copy — the difference
+        between one and two copies of a multi-hour recording in memory.
 
     Raises
     ------
@@ -207,11 +213,12 @@ def process_file(
     if config.audio_enhance and waveform.size:
         from .audio_io import enhance_speech
 
-        # Filter in place only for a waveform this run decoded itself: a buffer
-        # handed in by the caller must survive the call. Saves one full-length
-        # copy, which is what made multi-hour files run out of memory.
+        # Filter in place only for a waveform this run owns: decoded here, or
+        # handed over by a caller that gave up ownership. A buffer that the
+        # caller still needs must survive the call. Saves one full-length copy,
+        # which is what made multi-hour files run out of memory.
         waveform, level_db, mode = enhance_speech(
-            waveform, SAMPLE_RATE, inplace=decoded_here
+            waveform, SAMPLE_RATE, inplace=decoded_here or reuse_waveform
         )
         report(f"  audio enhanced: speech level {level_db:.1f} dB ({mode})")
 
@@ -237,7 +244,15 @@ def process_file(
             return cancelled()
 
         with diarizer_lock:
-            if _accepts_progress(diarizer):
+            if _accepts_blocking(diarizer):
+                turns = diarizer.diarize(
+                    waveform,
+                    SAMPLE_RATE,
+                    progress=diarization_progress,
+                    block_seconds=float(getattr(config, "diar_block_seconds", 0.0) or 0.0),
+                    block_overlap=float(getattr(config, "diar_block_overlap", 60.0) or 0.0),
+                )
+            elif _accepts_progress(diarizer):
                 turns = diarizer.diarize(
                     waveform, SAMPLE_RATE, progress=diarization_progress
                 )

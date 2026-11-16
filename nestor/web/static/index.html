@@ -100,12 +100,30 @@
   .rail {
     width: 260px; flex: none; background: var(--bg-2); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; min-height: 0;
+    transition: width .16s ease;
   }
+  /* Схлопнутая панель записей: узкая колонка с одними кнопками, чтобы
+     расшифровка получила всё освободившееся место. */
+  .rail.collapsed { width: 46px; }
+  .rail.collapsed .rail-title,
+  .rail.collapsed .rail-search-wrap,
+  .rail.collapsed .rail-list,
+  .rail.collapsed .rail-foot { display: none; }
+  .rail.collapsed .rail-head { padding: 12px 6px 8px; align-items: center; }
+  .rail.collapsed .rail-head-top { justify-content: center; }
+  .rail.collapsed .rail-tools { flex-direction: column; align-items: center; }
   .rail-head {
     display: flex; flex-direction: column; gap: 8px;
     padding: 14px 12px 10px; font-size: 11px; letter-spacing: .14em;
     text-transform: uppercase; color: var(--muted);
   }
+  .rail-head-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rail-toggle {
+    flex: none; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--muted);
+    font-size: 11px; line-height: 1; display: grid; place-items: center; cursor: pointer;
+  }
+  .rail-toggle:hover { border-color: var(--accent); color: var(--accent); }
   /* four 28px buttons + gaps need 124px; the rail is 130px, so they wrap to a
      second line instead of the last one sliding under <main> (unclickable) */
   .rail-tools { display: flex; gap: 4px; }
@@ -425,8 +443,16 @@
   #rename-pop button { padding: 2px 10px; }
 
   /* sheet */
-  .sheet { max-width: 900px; margin: 0 auto; padding: 22px 26px 30px; }
-  .sheet-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
+  /* Расшифровка занимает всё место между «Записями» и спикерами: у листа нет
+     ограничения ширины и центрирования, поэтому поля по бокам не пустуют. */
+  .sheet { padding: 0 18px 26px; }
+  /* Заголовок записи и её итог не уезжают при прокрутке расшифровки. */
+  .sheet-head {
+    display: flex; align-items: flex-start; gap: 14px;
+    position: sticky; top: 0; z-index: 9;
+    padding: 14px 0 10px; margin-bottom: 4px;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+  }
   .sheet-title { font-size: 19px; font-weight: 600; word-break: break-word; }
   .sheet-sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; display: flex; gap: 14px; flex-wrap: wrap; }
   /* Итоговая строка под заголовком записи: сколько говорящих нашлось и что с
@@ -443,42 +469,81 @@
     border-radius: 99px; font: inherit; font-size: 12px; padding: 2px 11px; cursor: pointer;
   }
   .result-bar .qbtn:hover { border-color: var(--accent); }
-  /* Липкая строка спикеров: не уезжает вверх, пока текст листается вниз.
-     Чипы переносятся на несколько строк; если их больше ~трёх строк, список
-     зажимается по высоте (с прокруткой) и рядом появляется кнопка «показать». */
-  .chips-bar {
-    position: sticky; top: 0; z-index: 6;
-    display: flex; align-items: flex-start; gap: 8px;
-    margin: 0 -26px 4px; padding: 7px 26px 6px;
-    background: var(--bg); border-bottom: 1px solid var(--line);
+  /* Липкая строка спикеров заменена вертикальной панелью справа от текста
+     (порядок: Записи — расшифровка — спикеры): список не переносится по
+     строкам, поэтому «убегающих» чипов больше нет. Панель сортируется по
+     числу реплик, внутри — своя прокрутка. */
+  .sheet-body { display: flex; gap: 18px; align-items: flex-start; }
+  .sheet-main { flex: 1 1 auto; min-width: 0; }
+  .speakers-panel {
+    flex: none; width: 224px; position: sticky; top: 84px;
+    display: flex; flex-direction: column; gap: 3px;
+    max-height: calc(100vh - 150px); overflow-y: auto;
+    padding: 6px; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 10px;
   }
-  .chips {
-    display: flex; gap: 4px; flex-wrap: wrap; align-content: flex-start;
-    flex: 1 1 auto; min-width: 0;
+  .speakers-panel::-webkit-scrollbar { width: 6px; }
+  .speakers-panel::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+  .speakers-panel .panel-title {
+    color: var(--muted); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; padding: 2px 6px 5px;
   }
-  .chips.collapsed { overflow-y: auto; max-height: 87px; }
-  .chips.collapsed::-webkit-scrollbar { width: 6px; }
-  .chips.collapsed::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+  /* строка спикера: полная ширина, поэтому показ кнопок при наведении
+     больше не «раздвигает» соседей и не переносит элемент на новую строку.
+     Полоска загруженности — отдельной строкой ниже, иначе имя не помещается. */
+  .speakers-panel .chip {
+    display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    width: 100%; border-radius: 8px; padding: 4px 6px;
+  }
+  .speakers-panel .chip .chip-row { display: flex; align-items: center; gap: 5px; }
+  .speakers-panel .chip .chip-row input { flex: 1 1 auto; min-width: 0; width: auto; }
+  .speakers-panel .chip .chip-voice,
+  .speakers-panel .chip .chip-merge { visibility: visible; }
+  .chip-count {
+    flex: none; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
+  }
+  /* нижняя строка спикера: число реплик слева, полоска занимает остаток */
+  .speakers-panel .chip .chip-meta {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+  }
+  /* Полоска загруженности спикера: длина пропорциональна числу его реплик
+     относительно самого разговорчивого спикера записи. */
+  .chip-bar {
+    flex: 1 1 auto; min-width: 0; height: 5px; border-radius: 3px;
+    background: var(--line-2); overflow: hidden;
+  }
+  .chip-bar-fill { display: block; height: 100%; border-radius: 3px; }
+  /* Служебная ветка «Фон»: в неё собираются мелкие ярлыки, которые скорее
+     всего не участники, а разговоры в глубине комнаты. Ничего не удаляется —
+     группы всегда можно раскрыть обратно в обычные строки спикеров. */
+  .bg-sep { height: 1px; background: var(--line-2); margin: 7px 2px 3px; }
+  .speakers-panel .chip.bg-group {
+    border-style: dashed; background: transparent; gap: 3px;
+  }
+  .speakers-panel .chip.bg-group .chip-row input { display: none; }
+  .speakers-panel .chip.bg-group .chip-bar-fill { background: var(--line-2) !important; }
+  .chip-voice.bg-pick.on { border-color: var(--accent); color: var(--accent); }
+  /* режим пометки фона: строки расшифровки ведут себя как кнопки */
+  body.bg-pick #segments .seg .txt { cursor: pointer; }
+  .speakers-panel .chip.bg-group .bg-name {
+    flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 99px;
     border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font-size: 11px;
   }
-  .chip .swatch { width: 7px; height: 7px; border-radius: 2px; }
+  .chip .swatch { width: 7px; height: 7px; border-radius: 2px; flex: none; }
   .chip input { width: 76px; background: transparent; border: 0; color: var(--text); font: inherit; font-size: 11px; outline: none; }
-  .chips-toggle {
-    flex: none; margin-top: 1px; background: none; border: 1px solid var(--line-2);
-    color: var(--muted); border-radius: 99px; font-size: 11px; padding: 1px 9px;
-  }
-  .chips-toggle:hover { color: var(--accent); border-color: var(--accent); }
   /* «Запомнить голос» — маленькая кнопка на чипе, видна при наведении.
      Высоту чипа (23px) не увеличивает. */
   .chip .chip-voice {
-    display: none; background: none; border: 0; padding: 0 1px; margin-left: 2px;
+    visibility: hidden; background: none; border: 0; padding: 0 1px; margin-left: 2px;
     color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer;
   }
-  .chip:hover .chip-voice, .chip:focus-within .chip-voice { display: inline; }
+  .chip:hover .chip-voice, .chip:focus-within .chip-voice { visibility: visible; }
   .chip .chip-voice:hover { color: var(--accent); }
-  .chip .chip-voice.saved { color: var(--ok); display: inline; }
+  .chip .chip-voice.saved { color: var(--ok); visibility: visible; }
   /* Единый тултип: один элемент на всю страницу, показывается у любого
      элемента с data-tip (кнопки и значки). data-tip вместо нативного
      подсказки-свойства title — свой стиль и быстрая задержка. */
@@ -495,16 +560,16 @@
      вектор (у длинной записи это до полуминуты: decode + re-embed). */
   .chip .chip-voice.saving,
   .chip:hover .chip-voice.saving, .chip:focus-within .chip-voice.saving {
-    display: inline; color: var(--accent);
+    visibility: visible; color: var(--accent);
     animation: vp-saving 1s ease-in-out infinite;
   }
   @keyframes vp-saving { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   /* «склеить с…» — вторая кнопка на чипе, в одном ряду с chip-voice */
   .chip .chip-merge {
-    display: none; background: none; border: 0; padding: 0 1px; margin-left: 1px;
+    visibility: hidden; background: none; border: 0; padding: 0 1px; margin-left: 1px;
     color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer;
   }
-  .chip:hover .chip-merge, .chip:focus-within .chip-merge { display: inline; }
+  .chip:hover .chip-merge, .chip:focus-within .chip-merge { visibility: visible; }
   .chip .chip-merge:hover { color: var(--accent); }
   /* чип с дублирующимся именем: жёлтая кромка — «это имя уже занято» */
   .chip.dup { border-color: #b98a00; }
@@ -793,7 +858,10 @@
 <div class="layout">
   <aside class="rail">
     <div class="rail-head">
-      <span>Записи</span>
+      <div class="rail-head-top">
+        <span class="rail-title">Записи</span>
+        <button class="rail-toggle" id="btn-rail-toggle" data-tip="Свернуть панель записей (Ctrl+B)">«</button>
+      </div>
       <div class="rail-tools">
         <button class="icon-btn" id="btn-rail-filter" data-tip="Показать только записи в работе и с ошибкой">⚑</button>
         <button class="icon-btn" id="btn-home" data-tip="На главную (настройки, голоса)">⌂</button>
@@ -940,14 +1008,17 @@
           </div>
           <div class="save-state" id="save-state"></div>
         </div>
-        <div class="result-bar hidden" id="result-bar"></div>
-        <div class="chips-bar">
-          <div class="chips" id="chips"></div>
-          <button class="chips-toggle hidden" id="chips-toggle"></button>
+        <div class="sheet-body">
+          <div class="sheet-main">
+            <div class="result-bar hidden" id="result-bar"></div>
+            <div class="filter-bar hidden" id="filter-bar"></div>
+            <div class="sel-bar hidden" id="sel-bar"></div>
+            <div id="segments"></div>
+          </div>
+          <aside class="speakers-panel" id="speakers-panel">
+            <div class="panel-title">Спикеры</div>
+          </aside>
         </div>
-        <div class="filter-bar hidden" id="filter-bar"></div>
-        <div class="sel-bar hidden" id="sel-bar"></div>
-        <div id="segments"></div>
       </div>
     </section>
 
@@ -1073,9 +1144,11 @@ const state = {
   redo: [],            // redo stack (Ctrl+Shift+Z / Ctrl+Y), cleared by a new edit
   segSel: new Set(),   // ids of transcript segments the user selected
   segSelAnchor: null,  // last clicked segment: the anchor for shift+click ranges
+  bgClosed: true,      // «Фон» группа в панели спикеров свёрнута
+  bgPickMode: false,   // включён режим «Похоже на фон»: клики по строкам помечают фон
+  bgLastMark: null,    // undo-снимок перед последней пометкой фона (для кнопки «Отменить»)
   colorIndex: {},      // speaker id -> stable colour slot (assigned on first sight)
   nextColor: 0,        // next free colour slot
-  chipsExpanded: false, // speaker chips list expanded (many speakers)
   voiceprints: [],     // saved voices: {slug, name, ...}
   glossary: null,      // {source, path, count, terms:[{term,aliases}]}
   glossaryQuery: '',   // glossary panel search filter (lower-case)
@@ -1091,6 +1164,7 @@ const state = {
   soloTimer: null,     // 50 ms tick that skips other speakers while a filter is on
   railQuery: '',       // rail name filter (substring, lower-case)
   railFilter: 'all',  // rail status filter: all | busy (working + errors) | error
+  railCollapsed: false,  // панель записей свёрнута в узкую колонку кнопок
   railSearchTimer: null,
   railKey: null,       // signature of the last rail render (skip rebuilds)
   railExpanded: new Set(), // rail record ids with the details block expanded
@@ -1664,6 +1738,8 @@ function tvLoadPrefs() {
     state.railFilter = railFilter;
     $('btn-rail-filter').classList.add('on');
   }
+  // collapsed/expanded state of the recordings rail
+  if (localStorage.getItem('nestor.rail.collapsed') === '1') setRailCollapsed(true);
 }
 
 function tvVisibleCols() {
@@ -2004,7 +2080,6 @@ async function openRecording(id) {
   state.speakers = [];
   state.colorIndex = {};
   state.nextColor = 0;
-  state.chipsExpanded = false;
   for (const seg of rec.segments) {
     if (!state.speakers.includes(seg.speaker)) state.speakers.push(seg.speaker);
     speakerIndex(seg.speaker);   // pin the colour before any re-sorting
@@ -2066,27 +2141,185 @@ async function openRecording(id) {
   loadRail();
 }
 
-// The chips list clamps itself by rendered height (~3 rows) - no fixed count.
-const CHIPS_MAX_ROWS = 3;
-
-/* Named speakers first: a user-labelled chip is what they are looking for.
-   The original order (by first utterance) is kept inside each group. */
-function sortChips() {
-  if (!state.current) return;
-  const head = state.speakers.filter(id => (state.names[id] || '').trim());
-  const tail = state.speakers.filter(id => !(state.names[id] || '').trim());
-  state.speakers = [...head, ...tail];
+/* Number of utterances per speaker in the open recording. */
+function speakerCounts() {
+  const counts = {};
+  for (const seg of (state.current ? state.current.segments : [])) {
+    counts[seg.speaker] = (counts[seg.speaker] || 0) + 1;
+  }
+  return counts;
 }
 
+/* Busiest speakers first: a person with 40 utterances is what the user is
+   looking for, while one-off fragments sink to the bottom of the column.
+   Ties keep the original order (by first utterance). */
+function sortChips() {
+  if (!state.current) return;
+  const counts = speakerCounts();
+  const order = new Map(state.speakers.map((id, index) => [id, index]));
+  state.speakers = [...state.speakers].sort((a, b) => {
+    const diff = (counts[b] || 0) - (counts[a] || 0);
+    return diff !== 0 ? diff : order.get(a) - order.get(b);
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Служебная группа «Фон».
+   Разговоры в глубине комнаты на слух почти неразличимы, но ASR их честно
+   расшифровывает. Автоматически удалять такие реплики нельзя: измерения на
+   реальных записях показали, что «тихий, но далёкий» ярлык может держать до
+   38% слов протокола (человек отошёл от микрофона). Поэтому фон не удаляется,
+   а собирается в сворачиваемую группу: по умолчанию туда попадают только
+   мелкие ярлыки (≤3 реплик) — измеренно они дают ≤6,9% слов и почти всегда
+   являются осколками. Пользователь может пометить оставшийся фон вручную
+   (режим «Похоже на фон») или вернуть любую строку обратно в спикеры.
+   -------------------------------------------------------------------------- */
+
+const BG_MAX_SEGMENTS = 3;  // ярлык с таким числом реплик считается осколком/фоном
+const BG_TOKEN = /^(шум|шум\w*|noise|фон|background)$/i;
+
+/* Ярлыки, которые сейчас считаются «фоном». */
+function backgroundIds() {
+  if (!state.current) return new Set();
+  const counts = speakerCounts();
+  const ids = new Set();
+  for (const id of state.speakers) {
+    const name = (state.names[id] || '').trim();
+    if (BG_TOKEN.test(name) || (counts[id] || 0) <= BG_MAX_SEGMENTS) ids.add(id);
+  }
+  return ids;
+}
+
+/* Есть ли у записи фон вообще — от этого зависит, показывать ли ветку. */
+function backgroundPresent() {
+  if (!state.current) return false;
+  return state.speakers.some((id) => backgroundIds().has(id) || isBackground(id));
+}
+
+/* Помечен ли ярлык фоном вручную (прописан в state.names[id] == «Фон»). */
+function isBackground(id) {
+  return (state.names[id] || '').trim().toLowerCase() === 'фон';
+}
+
+/* Порядок показа ярлыка: сначала обычные спикеры, затем фон. */
+function backgroundRank(id) {
+  if (isBackground(id)) return 2;
+  if (backgroundIds().has(id)) return 1;
+  return 0;
+}
+
+function appendBgSep(box) {
+  const sep = document.createElement('div');
+  sep.className = 'bg-sep';
+  box.appendChild(sep);
+}
+
+function appendBgHeader(box, count) {
+  const chip = document.createElement('span');
+  chip.className = 'chip bg-group';
+  chip.dataset.bg = 'group';
+  const row = document.createElement('div');
+  row.className = 'chip-row';
+  chip.appendChild(row);
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'bg-name';
+  toggle.textContent = `${state.bgClosed ? '▶' : '▼'} Фон · ${count}`;
+  toggle.dataset.tip = 'Разговоры не у микрофона и мелкие осколки. ' +
+    (state.bgClosed ? 'Показать' : 'Скрыть');
+  toggle.onclick = () => { state.bgClosed = !state.bgClosed; renderChips(); };
+  row.appendChild(toggle);
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.className = 'chip-voice bg-pick';
+  pickBtn.textContent = '+';
+  pickBtn.dataset.tip = state.bgPickMode
+    ? 'Выход из режима пометки фона'
+    : 'Пометить фон: кликайте по репликам в расшифровке, они станут «Фон»';
+  if (state.bgPickMode) pickBtn.classList.add('on');
+  pickBtn.onclick = () => toggleBgPick();
+  row.appendChild(pickBtn);
+  box.appendChild(chip);
+}
+
+/* Перевести ярлык в фон или обратно, не удаляя реплики. */
+function setBackgroundLabel(id, isBg) {
+  snapshot();
+  const name = (state.names[id] || '').trim();
+  if (isBg) {
+    if (!name) state.names[id] = 'Фон';
+    else if (!BG_TOKEN.test(name)) state.names[id] = `Фон: ${name}`;
+  } else {
+    // снять пометку: убрать служебный «Фон» / «Фон: », оставив исходное имя
+    const m = /^фон\s*:?\s*/i.exec(name);
+    state.names[id] = m ? name.slice(m[0].length).trim() : '';
+    state.bgPickMode = false;
+  }
+  markDirty();
+  sortChips();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+}
+
+/* Режим «Похоже на фон»: фильтр по спикеру и обычный клик по строке —
+   пометка. Слушатели вешаются один раз. */
+function toggleBgPick() {
+  state.bgPickMode = !state.bgPickMode;
+  state.filterSpeaker = null;
+  document.body.classList.toggle('bg-pick', state.bgPickMode);
+  renderChips();
+  renderSegments();
+  if (state.bgPickMode) toast('Кликайте по строкам фона — они перейдут в «Фон»');
+}
+
+document.addEventListener('click', (e) => {
+  if (!state.bgPickMode) return;
+  const row = e.target.closest && e.target.closest('#segments .seg');
+  if (!row) return;
+  const seg = (state.current ? state.current.segments : []).find((s) => s.id === row.dataset.id);
+  if (!seg) return;
+  e.preventDefault();
+  e.stopPropagation();
+  scopeBackgroundMark([seg.speaker]);
+}, true);
+
+/* Пометить всё, что принадлежит данным ярлыкам, как фон (одним undo-шагом). */
+function scopeBackgroundMark(ids) {
+  const targets = [...new Set(ids)].filter((id) => id && !isBackground(id));
+  if (!targets.length) return;
+  snapshot();  // одна запись в истории на всё действие
+  for (const id of targets) {
+    const name = (state.names[id] || '').trim();
+    state.names[id] = BG_TOKEN.test(name) ? name : (name ? `Фон: ${name}` : 'Фон');
+  }
+  markDirty();
+  sortChips();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+}
+
+/* --------------------------------------------------------------------------
+   Служебная группа «Фон»: конец блока.
+   -------------------------------------------------------------------------- */
+
 function renderChips() {
-  const box = $('chips');
+  const box = $('speakers-panel');
+  if (!box) return;
   box.innerHTML = '';
-  box.classList.remove('collapsed');
-  box.style.removeProperty('max-height');
-  const toggle = $('chips-toggle');
-  toggle.classList.add('hidden');
+  const title = document.createElement('div');
+  title.className = 'panel-title';
+  title.textContent = 'Спикеры';
+  box.appendChild(title);
   const speakers = state.speakers;
+  const counts = speakerCounts();
   if (!speakers.length) return;
+
+  // фон (мелкие ярлыки и всё, что помечено вручную) уходит отдельной группой
+  const bgIds = backgroundIds();
+  const mainIds = speakers.filter((id) => !bgIds.has(id));
+  const bgList = speakers.filter((id) => bgIds.has(id));
 
   // names that occur on more than one chip - highlighted as duplicates
   const nameCounts = {};
@@ -2094,11 +2327,18 @@ function renderChips() {
     const name = (state.names[id] || '').trim();
     if (name) nameCounts[name] = (nameCounts[name] || 0) + 1;
   }
+  // longest bar = the busiest speaker; shorter bars are relative to it
+  const maxCount = Math.max(1, ...speakers.map((id) => counts[id] || 0));
 
-  for (const id of speakers) {
+  if (bgList.length && mainIds.length) appendBgSep(box);
+  for (const id of mainIds) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.dataset.speaker = id;
+    // верхняя строка: квадратик, имя, счётчик и кнопки; полоска — строкой ниже
+    const row = document.createElement('div');
+    row.className = 'chip-row';
+    chip.appendChild(row);
     const sw = document.createElement('span');
     sw.className = 'swatch';
     sw.style.background = speakerColor(id);
@@ -2118,16 +2358,41 @@ function renderChips() {
       renderBookmarks();
     };
     attachNameSuggestions(input, id);
-    chip.appendChild(sw);
+    row.appendChild(sw);
     // magenta dot: the name was recognised from the voice library
     const matchInfo = state.match[id];
     if (matchInfo && matchInfo.assigned_name) {
       const auto = document.createElement('span');
       auto.className = 'chip-auto';
       auto.dataset.tip = `Распознан по голосу: ${matchInfo.assigned_name} (${Math.round((matchInfo.confidence || 0) * 100)}%)`;
-      chip.appendChild(auto);
+      row.appendChild(auto);
     }
-    chip.appendChild(input);
+    row.appendChild(input);
+    // Нижняя строка: число реплик (с процентом узнавания) и полоска
+    // загруженности. Обе величины стоят под именем, чтобы кнопки в верхней
+    // строке не отнимали ширину у поля имени.
+    const meta = document.createElement('div');
+    meta.className = 'chip-meta';
+    const n = counts[id] || 0;
+    const conf = matchInfo && matchInfo.assigned_name
+      ? ` · ${Math.round((matchInfo.confidence || 0) * 100)}%` : '';
+    const count = document.createElement('span');
+    count.className = 'chip-count';
+    count.textContent = `${n}${conf}`;
+    count.dataset.tip = conf
+      ? `Реплик: ${n}; совпадение с сохранённым голосом: ${conf.trim().replace('· ', '')}`
+      : `Реплик: ${n}`;
+    // нагрузочная полоска: доля этого спикера от самого разговорчивого
+    const bar = document.createElement('span');
+    bar.className = 'chip-bar';
+    const fill = document.createElement('i');
+    fill.className = 'chip-bar-fill';
+    fill.style.width = `${Math.round((n / maxCount) * 100)}%`;
+    fill.style.background = speakerColor(id);
+    bar.appendChild(fill);
+    meta.appendChild(count);
+    meta.appendChild(bar);
+    chip.appendChild(meta);
     // duplicate-name marker: the same name is typed on another chip
     const ownName = (state.names[id] || '').trim();
     if (ownName && nameCounts[ownName] > 1) {
@@ -2156,7 +2421,7 @@ function renderChips() {
       const picked = selectedSegments().filter(s => s.speaker === id).map(s => s.id);
       await saveVoiceFor(id, name, btn, picked.length ? picked : undefined);
     };
-    chip.appendChild(btn);
+    row.appendChild(btn);
     // "merge into..." - fold this label into another speaker of the recording
     if (speakers.length > 1) {
       const mergeBtn = document.createElement('button');
@@ -2165,7 +2430,7 @@ function renderChips() {
       mergeBtn.textContent = '⇊';
       mergeBtn.dataset.tip = 'Склеить с другим спикером: все реплики перейдут к нему';
       mergeBtn.onclick = () => showMergePopup(mergeBtn, id, speakers);
-      chip.appendChild(mergeBtn);
+      row.appendChild(mergeBtn);
     }
     // "rename everywhere" - apply this name to all recordings + voice library
     const own = (state.names[id] || '').trim();
@@ -2176,28 +2441,66 @@ function renderChips() {
       renBtn.textContent = '⇄';
       renBtn.dataset.tip = 'Переименовать везде: во всех записях и в библиотеке голосов';
       renBtn.onclick = () => renameSpeakerEverywhere(renBtn, own);
-      chip.appendChild(renBtn);
+      row.appendChild(renBtn);
     }
     box.appendChild(chip);
   }
 
-  // Clamp by the rendered height: more than CHIPS_MAX_ROWS rows -> scrollable
-  // box plus an in-place expand toggle (the toggle lives outside the scroll).
-  const rowHeight = 23 + 4; // chip height + row gap
-  if (box.scrollHeight > rowHeight * CHIPS_MAX_ROWS && !state.chipsExpanded) {
-    box.classList.add('collapsed');
-    box.style.maxHeight = rowHeight * CHIPS_MAX_ROWS + 'px';
-    toggle.textContent = `спикеров: ${speakers.length} — показать все`;
-    toggle.dataset.tip = 'Показать всех спикеров';
-    toggle.classList.remove('hidden');
-    toggle.onclick = () => { state.chipsExpanded = true; renderChips(); };
-  } else if (state.chipsExpanded && box.scrollHeight > rowHeight * CHIPS_MAX_ROWS) {
-    toggle.textContent = 'свернуть';
-    toggle.dataset.tip = 'Свернуть список спикеров';
-    toggle.classList.remove('hidden');
-    toggle.onclick = () => { state.chipsExpanded = false; renderChips(); };
+  // строка управления группой «Фон» + её содержимое, когда она раскрыта
+  if (bgList.length) {
+    appendBgHeader(box, bgList.length);
+    if (!state.bgClosed) {
+      for (const id of bgList) appendBgRow(box, id, counts, nameCounts, maxCount);
+    }
   }
+
   renderResultBar();
+}
+
+/* Строка ярлыка внутри группы «Фон»: имя, число реплик, вернуть в спикеры. */
+function appendBgRow(box, id, counts, nameCounts, maxCount) {
+  const chip = document.createElement('span');
+  chip.className = 'chip bg-group';
+  chip.dataset.speaker = id;
+  if (state.filterSpeaker === id) chip.classList.add('filter');
+  const row = document.createElement('div');
+  row.className = 'chip-row';
+  chip.appendChild(row);
+  const sw = document.createElement('span');
+  sw.className = 'swatch';
+  sw.style.background = speakerColor(id);
+  sw.dataset.tip = 'Показать только реплики этой строки';
+  sw.onclick = () => setSpeakerFilter(id);
+  row.appendChild(sw);
+  const name = document.createElement('span');
+  name.className = 'bg-name';
+  name.textContent = speakerName(id);
+  row.appendChild(name);
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'chip-merge';
+  back.textContent = '↩';
+  back.dataset.tip = 'Вернуть в список спикеров (это не фон)';
+  back.onclick = () => setBackgroundLabel(id, false);
+  row.appendChild(back);
+  const meta = document.createElement('div');
+  meta.className = 'chip-meta';
+  const n = counts[id] || 0;
+  const count = document.createElement('span');
+  count.className = 'chip-count';
+  count.textContent = `${n}`;
+  count.dataset.tip = `Реплик: ${n}`;
+  const bar = document.createElement('span');
+  bar.className = 'chip-bar';
+  const fill = document.createElement('i');
+  fill.className = 'chip-bar-fill';
+  fill.style.width = `${Math.round((n / maxCount) * 100)}%`;
+  fill.style.background = 'var(--muted)';
+  bar.appendChild(fill);
+  meta.appendChild(count);
+  meta.appendChild(bar);
+  chip.appendChild(meta);
+  box.appendChild(chip);
 }
 
 /* Итоговая строка результата: сколько говорящих нашлось и действие,
@@ -2659,7 +2962,7 @@ function nextSpeakerName() {
 }
 
 function chipElement(id) {
-  return [...document.querySelectorAll('#chips .chip')]
+  return [...document.querySelectorAll('#speakers-panel .chip')]
     .find(c => c.dataset.speaker === id) || null;
 }
 
@@ -4417,6 +4720,16 @@ function goHome() {
 $('btn-new').onclick = () => drop.click();
 $('btn-home').onclick = goHome;
 $('btn-table').onclick = openTable;
+function setRailCollapsed(value) {
+  state.railCollapsed = !!value;
+  document.querySelector('.rail').classList.toggle('collapsed', state.railCollapsed);
+  const btn = $('btn-rail-toggle');
+  btn.textContent = state.railCollapsed ? '»' : '«';
+  btn.dataset.tip = state.railCollapsed ? 'Развернуть панель записей (Ctrl+B)' : 'Свернуть панель записей (Ctrl+B)';
+  try { localStorage.setItem('nestor.rail.collapsed', state.railCollapsed ? '1' : '0'); } catch (err) {}
+  drawWave();
+}
+$('btn-rail-toggle').onclick = () => setRailCollapsed(!state.railCollapsed);
 $('btn-tv-close').onclick = closeTable;
 $('btn-rail-filter').onclick = (e) => {
   e.stopPropagation();
@@ -4980,13 +5293,24 @@ $('btn-help').onclick = () => {
      (или создаёт для неё нового) — если диктор определён ошибочно.
      Двойной клик по реплике проигрывает её отдельно; у заголовка записи видно,
      сохраняются ли правки.</p>
-  <p><b>Спикеры</b>: клик по цветному квадратику на ярлыке показывает только
-     реплики этого спикера (Esc или «показать всех» — вернуть всё). Поиск
+  <p><b>Спикеры</b>: справа от реплик — столбец со спикерами. Сверху вниз по
+     числу реплик: самый разговорчивый вверху, редкие осколки внизу (столбец
+     прокручивается). В строке — имя, число реплик с полоской загруженности и,
+     если голос узнан, процент
+     совпадения. Клик по цветному квадратику показывает только реплики этого
+     спикера (Esc или «показать всех» — вернуть всё). Кнопки в строке: 🎙 —
+     запомнить голос, ⇊ — склеить с другим, ⇄ — переименовать везде. Внизу
+     столбца — свёрнутая ветка <b>«Фон»</b>: туда попадают мелкие ярлыки (до
+     трёх реплик) и всё, что названо «шум»/«фон» — обычно это не участники, а
+     разговоры в глубине комнаты. Раскройте её, чтобы посмотреть; кнопка <b>↩</b>
+     возвращает ярлык в список, а <b>«+»</b> включает режим пометки фона — щёлкайте
+     по репликам в тексте. Ничего не удаляется, текст не меняется. Поиск
      подсвечивает найденное в тексте, Enter переходит к следующему совпадению.</p>
   <p><b>Клавиши</b>: пробел — играть/пауза, ←/→ — назад/вперёд на 5 секунд,
      <b>J</b>/<b>K</b> — следующая/предыдущая реплика, <b>Enter</b> — проиграть
      текущую реплику, Ctrl+F — поиск, Ctrl+Z — отменить правку, Ctrl+Shift+Z —
-     вернуть отменённое, Ctrl+E — выгрузка.</p>
+     вернуть отменённое, Ctrl+E — выгрузка, Ctrl+B — свернуть/развернуть
+     панель записей.</p>
   <p><b>Ручная правка спикеров</b>: выделите реплики в списке (Ctrl+клик —
      добавить, Shift+клик — диапазон, «Выбрать все реплики…» — все реплики одного
      спикера) и выберите действие в панели над списком: «Выделить в нового
@@ -4994,7 +5318,10 @@ $('btn-help').onclick = () => {
      разложить крупный блок на реальных людей; остальные записи не затрагиваются.</p>
   <p><b>Список записей</b> слева: поле сверху фильтрует записи по имени, кнопка
      ⚑ оставляет только записи в работе и с ошибкой. При наведении на запись
-     видно её подробности (дата, длительность, спикеры, реплики, модель).</p>
+     видно её подробности (дата, длительность, спикеры, реплики, модель).
+     Кнопка « в правом верхнем углу панели (или <b>Ctrl+B</b>) сворачивает её в
+     узкую колонку — расшифровка занимает освободившееся место; состояние
+     запоминается.</p>
   <p><b>Итог под заголовком записи</b>: сколько говорящих нашлось и кнопка
      «Только спикеры» — заново сравнить голоса и склеить ярлыки
      одного человека; повторной расшифровки нет, текст и правки сохранятся.</p>
@@ -5658,6 +5985,11 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+Y is the other common redo chord (Windows)
   if (mod && !editing && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   // Ctrl+F / Ctrl+E act on the open record; outside the editor they are no-ops
+  if (mod && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    setRailCollapsed(!state.railCollapsed);
+    return;
+  }
   if (mod && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     if (state.current) { $('search').focus(); $('search').select(); }

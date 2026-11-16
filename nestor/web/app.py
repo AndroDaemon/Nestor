@@ -588,6 +588,7 @@ class Processor:
                 last_stage = stage
 
         waveform = None
+        peaks: Optional[List[float]] = None
         try:
             # decoding a long recording takes a while: show the real stage
             # with a live fraction (same band the pipeline uses for decode)
@@ -601,13 +602,22 @@ class Processor:
             waveform, from_cache = load_or_decode(self.library, recording, on_decode)
             if from_cache:
                 on_stage("decode", 0.06)  # cache hit: decode band done instantly
+            # Take the envelope while the buffer is still the raw decoded audio:
+            # process_file() below gets ownership of it and may filter it in
+            # place. Keeping a second full-length copy around is exactly what
+            # made multi-hour recordings run out of memory.
+            peaks = compute_peaks(waveform)
             transcript = process_file(
                 config,
                 self.library.recording_source(recording),
                 on_stage=on_stage,
                 waveform=waveform,
                 cancel=event.is_set,
+                reuse_waveform=True,
             )
+            # ownership was handed to the pipeline: release our reference now so
+            # the buffer can be freed while the transcript is being written
+            waveform = None
 
             recording.duration = transcript.duration
             recording.model = transcript.model
@@ -638,7 +648,8 @@ class Processor:
 
             if event.is_set():
                 # stopped mid-transcription: keep what was recognised so far
-                self.library.save_peaks(recording.id, compute_peaks(waveform))
+                if peaks:
+                    self.library.save_peaks(recording.id, peaks)
                 self._mark_cancelled(recording)
                 write_timings("cancelled", "cancelled")
                 self.library.log(
@@ -652,7 +663,8 @@ class Processor:
             recording.progress = 1.0
             recording.error = None
 
-            self.library.save_peaks(recording.id, compute_peaks(waveform))
+            if peaks:
+                self.library.save_peaks(recording.id, peaks)
             # Persist the per-stage breakdown *before* the final status save:
             # whoever observes "done" on disk must already see stage_seconds in
             # the record. write_timings() sets stage_seconds and saves the
@@ -665,8 +677,8 @@ class Processor:
             )
             self._maybe_notify(recording)
         except JobCancelled:
-            if waveform is not None:
-                self.library.save_peaks(recording.id, compute_peaks(waveform))
+            if peaks:
+                self.library.save_peaks(recording.id, peaks)
             self._mark_cancelled(recording)
             write_timings("cancelled", "cancelled")
             self.library.log(f"stopped {recording.filename}: no transcript kept")
@@ -982,6 +994,8 @@ class ProcessOptions(BaseModel):
     diar_threshold: Optional[float] = None
     diar_min_duration_on: Optional[float] = None
     diar_min_duration_off: Optional[float] = None
+    diar_block_seconds: Optional[int] = None
+    diar_block_overlap: Optional[int] = None
     rescue_holes: Optional[bool] = None
     glossary: Optional[bool] = None
 
@@ -1062,6 +1076,10 @@ def job_config(
         config.diar_min_duration_on = float(chosen["diar_min_duration_on"])
     if chosen.get("diar_min_duration_off") is not None:
         config.diar_min_duration_off = float(chosen["diar_min_duration_off"])
+    if chosen.get("diar_block_seconds") is not None:
+        config.diar_block_seconds = float(chosen["diar_block_seconds"])
+    if chosen.get("diar_block_overlap") is not None:
+        config.diar_block_overlap = float(chosen["diar_block_overlap"])
     if chosen.get("rescue_holes") is not None:
         config.rescue_holes = as_bool(chosen.get("rescue_holes"), True)
     if chosen.get("glossary") is not None:
@@ -1104,13 +1122,18 @@ def _notify_done(title: str, body: str) -> None:
         # filename with a quote would otherwise break out and inject commands
         safe_title = str(title).replace("'", "''")
         safe_body = str(body).replace("'", "''")
+        # ToastText02 ships with two *empty* <text> nodes, so the old
+        # placeholders-must-be-replaced trick produced a blank toast (Windows
+        # filled in its own "Новое сообщение" title). Filling the nodes by
+        # index makes the text appear, and InnerText escapes XML for us.
         script = (
             "[Windows.UI.Notifications.ToastNotificationManager,"
             " Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
             "$t=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
             "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-            "$x=$t.GetXml();"
-            f"$x=$x.Replace('placeholder1','{safe_title}').Replace('placeholder2','{safe_body}');"
+            "$nodes=$t.GetElementsByTagName('text');"
+            f"$nodes.Item(0).InnerText='{safe_title}';"
+            f"$nodes.Item(1).InnerText='{safe_body}';"
             "$n=New-Object Windows.UI.Notifications.ToastNotification $t;"
             "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
             "'Nestor').Show($n)"
@@ -1153,6 +1176,8 @@ def _settings_snapshot(config: Config) -> Dict[str, object]:
         "diarization_backend": config.diarization_backend,
         "num_speakers": config.num_speakers,
         "diar_threshold": config.diar_threshold,
+        "diar_block_seconds": config.diar_block_seconds,
+        "diar_block_overlap": config.diar_block_overlap,
         "audio_enhance": bool(config.audio_enhance),
         "rescue_holes": bool(config.rescue_holes),
         "glossary": bool(config.glossary),
@@ -1610,6 +1635,8 @@ def create_app(
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
             "diar_min_duration_off": settings.get("diar_min_duration_off"),
+            "diar_block_seconds": settings.get("diar_block_seconds", 1200),
+            "diar_block_overlap": settings.get("diar_block_overlap", 60),
             "rescue_holes": settings.get("rescue_holes", True),
             "glossary": settings.get("glossary", False),
         }
@@ -1690,6 +1717,8 @@ def create_app(
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
             "diar_min_duration_off": settings.get("diar_min_duration_off"),
+            "diar_block_seconds": settings.get("diar_block_seconds", 1200),
+            "diar_block_overlap": settings.get("diar_block_overlap", 60),
             "rescue_holes": settings.get("rescue_holes", True),
             "glossary": settings.get("glossary", False),
         }

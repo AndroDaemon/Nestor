@@ -37,6 +37,16 @@ def _accepts_progress(diarizer) -> bool:
         return False
 
 
+def _accepts_blocking(diarizer) -> bool:
+    """Whether ``diarizer.diarize`` supports block-wise long recordings."""
+    try:
+        import inspect
+
+        return "block_seconds" in inspect.signature(diarizer.diarize).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def build_diarizer(config, report=None):
     """Create the diarizer described by the configuration.
 

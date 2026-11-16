@@ -113,6 +113,8 @@ class LocalDiarizer:
         waveform: np.ndarray,
         sample_rate: int,
         progress: Optional[Callable[[float], int]] = None,
+        block_seconds: Optional[float] = None,
+        block_overlap: float = 60.0,
     ) -> List[Turn]:
         """Return speaker turns for a 16 kHz mono waveform.
 
@@ -121,16 +123,48 @@ class LocalDiarizer:
         truthy value from ``progress`` aborts the run (sherpa-onnx stops when
         the callback returns non-zero); the result is then empty/partial and
         the caller must check its own stop flag.
+
+        ``block_seconds`` diarizes the recording in overlapping blocks instead
+        of one call. sherpa-onnx copies the whole waveform into its own buffer,
+        so a single call on a multi-hour file costs a second full-length copy —
+        the difference between fitting in a low-RAM machine and dying with
+        ``bad allocation``. Per-block memory is bounded by the block length; the
+        labels of neighbouring blocks are stitched back together by comparing
+        per-cluster voice embeddings.
         """
         samples = np.ascontiguousarray(waveform, dtype=np.float32)
         if samples.size == 0:
             return []
 
+        total_seconds = samples.shape[0] / float(sample_rate)
+        if (
+            block_seconds is None
+            or block_seconds <= 0
+            or total_seconds <= block_seconds * 1.5
+        ):
+            return self._diarize_call(samples, sample_rate, 0.0, progress)
+
+        return self._diarize_blocks(
+            samples, sample_rate, float(block_seconds), float(block_overlap), progress
+        )
+
+    # ------------------------------------------------------------------ blocks
+    def _diarize_call(
+        self,
+        samples: np.ndarray,
+        sample_rate: int,
+        offset: float,
+        progress: Optional[Callable[[float], int]],
+        span: float = 1.0,
+        base: float = 0.0,
+    ) -> List[Turn]:
+        """One sherpa-onnx call over ``samples``; times shifted by ``offset``."""
         callback = None
         if progress is not None:
-            def callback(done: int, total: int) -> int:
+            def callback(done: int, total: int) -> int:  # noqa: F811
+                fraction = done / total if total > 0 else 0.0
                 try:
-                    stop = progress(done / total if total > 0 else 0.0)
+                    stop = progress(base + span * min(1.0, max(0.0, fraction)))
                 except Exception:  # noqa: BLE001 - never abort the job from UI
                     stop = None
                 return 1 if stop else 0  # non-zero aborts diarization
@@ -143,6 +177,142 @@ class LocalDiarizer:
             if end <= start:
                 continue
             turns.append(
-                Turn(start=round(start, 3), end=round(end, 3), speaker=f"SPEAKER_{int(segment.speaker):02d}")
+                Turn(
+                    start=round(start + offset, 3),
+                    end=round(end + offset, 3),
+                    speaker=f"SPEAKER_{int(segment.speaker):02d}",
+                )
             )
         return turns
+
+    def _cluster_centroids(
+        self,
+        samples: np.ndarray,
+        sample_rate: int,
+        turns: List[Turn],
+        offset: float = 0.0,
+    ) -> dict:
+        """L2-normalised mean voice embedding per local label (may be empty).
+
+        Used only to match labels between blocks; a cluster whose segments are
+        all too short yields no centroid and always gets a fresh global label.
+
+        ``turns`` carry absolute times while ``samples`` may be a single block,
+        so ``offset`` (where the block starts) shifts the regions back into the
+        block's own timeline. Without it every block but the first embedded
+        unrelated audio, which is what scattered the label list.
+        """
+        from .speaker_embed import embed_segments, l2_normalise
+
+        regions = [(turn.start - offset, turn.end - offset) for turn in turns]
+        vectors = embed_segments(samples, sample_rate, regions, min_duration=0.5)
+        sums: dict = {}
+        counts: dict = {}
+        for turn, vector in zip(turns, vectors):
+            if vector is None:
+                continue
+            sums[turn.speaker] = sums.get(turn.speaker, 0.0) + vector
+            counts[turn.speaker] = counts.get(turn.speaker, 0) + 1
+        centroids = {}
+        for label, total in sums.items():
+            centroids[label] = l2_normalise(total / counts[label])
+        return centroids
+
+    def _diarize_blocks(
+        self,
+        samples: np.ndarray,
+        sample_rate: int,
+        block_seconds: float,
+        overlap: float,
+        progress: Optional[Callable[[float], int]],
+    ) -> List[Turn]:
+        """Diarize in overlapping blocks and stitch labels across the seams."""
+        total_seconds = samples.shape[0] / float(sample_rate)
+        overlap = max(0.0, min(overlap, block_seconds * 0.5))
+        step = block_seconds - overlap
+        if step <= 0:
+            step = block_seconds
+
+        starts: List[float] = []
+        cursor = 0.0
+        while cursor < total_seconds:
+            starts.append(cursor)
+            cursor += step
+        block_count = len(starts)
+
+        prototypes: List["np.ndarray"] = []
+        names: List[str] = []
+        collected: List[Turn] = []
+        seam = overlap * 0.5
+
+        for index, start_sec in enumerate(starts):
+            first = int(start_sec * sample_rate)
+            last = min(samples.shape[0], int((start_sec + block_seconds) * sample_rate))
+            if last <= first:
+                break
+            piece = samples[first:last]
+            base = index / float(block_count)
+            span = 1.0 / float(block_count)
+            turns = self._diarize_call(
+                piece, sample_rate, start_sec, progress, span=span, base=base
+            )
+            if turns:
+                centroids = self._cluster_centroids(
+                    piece, sample_rate, turns, offset=start_sec
+                )
+                mapping = self._match_labels(centroids, prototypes, names)
+                for turn in turns:
+                    turn.speaker = mapping.get(turn.speaker, turn.speaker)
+
+            is_first = index == 0
+            is_last = index == block_count - 1
+            block_end = start_sec + block_seconds
+            for turn in turns:
+                # Trim the overlap halves so the same speech is not emitted by
+                # both neighbours: keep the second half of a leading overlap,
+                # and the first half of a trailing one.
+                if not is_first and turn.start < start_sec + seam:
+                    continue
+                if not is_last and turn.start >= block_end - seam:
+                    continue
+                collected.append(turn)
+
+        collected.sort(key=lambda turn: (turn.start, turn.end))
+        return collected
+
+    def _match_labels(
+        self,
+        centroids: dict,
+        prototypes: List["np.ndarray"],
+        names: List[str],
+        threshold: float = 0.6,
+    ) -> dict:
+        """Map this block's local labels onto the global ones from earlier blocks.
+
+        A label with no centroid, or one whose best cosine falls below
+        ``threshold``, becomes a new global label — a wrong stitch merges two
+        people for the whole recording, so the bar is deliberately high.
+        """
+        mapping: dict = {}
+        for label, vector in centroids.items():
+            best_index = -1
+            best_score = threshold
+            for index, prototype in enumerate(prototypes):
+                score = float(np.dot(vector, prototype))
+                if score >= best_score:
+                    best_score = score
+                    best_index = index
+            if best_index < 0:
+                prototypes.append(vector)
+                names.append(f"SPEAKER_{len(names):02d}")
+                best_index = len(names) - 1
+            else:
+                # keep the prototype running so later blocks compare against a
+                # stable estimate of the whole voice, not a single block
+                prototype = prototypes[best_index]
+                prototypes[best_index] = prototype * 0.7 + vector * 0.3
+                norm = float(np.linalg.norm(prototypes[best_index]))
+                if norm > 0:
+                    prototypes[best_index] = prototypes[best_index] / norm
+            mapping[label] = names[best_index]
+        return mapping
