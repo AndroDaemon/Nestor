@@ -58,39 +58,50 @@
   `test_timings_written_after_job` падал примерно 1 раз из 5 (после правки —
   6 прогонов подряд без падений).
 
+## Что готово к публикации 1.5.3 (сделано в репозитории)
+
+- Собран `dist\Nestor\Nestor.exe` (16.11.2026 15:45, версия 1.5.3) и
+  `packaging\output\Nestor-Setup-1.5.3.exe` (277 076 611 Б, ProductVersion
+  1.5.3).
+- Собрана папка `releases\v1.5.3\` (не под git): `Nestor-Setup-1.5.3.exe`,
+  `nestor-1.5.3-source.zip` (101 файл исходников), `USER-GUIDE.html`,
+  `DESCRIPTION.md`.
+- Все изменения закоммичены, `master` чист; **локальный тег `v1.5.3` создан**
+  (`git tag --list "v1.5*"` → `v1.5.0`, `v1.5.1`, `v1.5.3`).
+- Версия 1.5.3 согласована в `nestor/__init__.py`, `pyproject.toml`,
+  `packaging/Nestor.iss`, `README.md`, `docs/rukovodstvo.md`,
+  `docs/voiceprints.md`.
+- Текст релиза — `docs/release-notes-1.5.3.md`.
+
 ## Что нужно сделать человеку
 
-GitHub CLI установлен в `%TEMP%\ghcli\bin\gh.exe` (winget на машине нет).
-Авторизации нет — она требует вашего входа.
+Из этой сессии `git push` и `gh release create` выполнить нельзя: GitHub CLI
+на машине отсутствует (`%TEMP%\ghcli\bin` удалён), а `credential.helper` в
+`~/.gitconfig` указывает на этот отсутствующий `gh.exe`, поэтому любой сетевой
+git падает с `could not read Username for 'https://github.com'`. Нужен ваш вход
+в браузере.
 
-1. Войти в GitHub (один раз, в браузере):
+1. Поставить GitHub CLI и войти (один раз, откроется браузер):
 
    ```powershell
-   & "$env:TEMP\ghcli\bin\gh.exe" auth login
+   winget install --id GitHub.cli
+   gh auth login
    ```
 
-2. Создать репозиторий и запушить `master` (подставьте владельца; `--public`
-   или `--private`):
+2. Запушить `master` вместе с тегом (тег уже создан локально):
 
    ```powershell
-   gh repo create AndroDaemon/Nestor --source . --public --push `
-     --description "Offline transcription and speaker diarization for Russian audio on CPU"
-   ```
-
-   Если репозиторий уже создан вручную:
-
-   ```powershell
-   git remote add origin https://github.com/AndroDaemon/Nestor.git
    git push -u origin master
+   git push origin v1.5.3
    ```
 
-3. Поставить тег версии и приложить установщик:
+3. Создать релиз и приложить установщик и исходники:
 
    ```powershell
-   git tag -a v1.3.7 -m "Nestor 1.3.7"
-   git push origin v1.3.7
-   gh release create v1.3.7 "packaging/output/Nestor-Setup-1.3.7.exe" `
-     --title "Nestor 1.3.7" --notes-file docs/release-notes-1.3.7.md
+   gh release create v1.5.3 `
+     "releases/v1.5.3/Nestor-Setup-1.5.3.exe" `
+     "releases/v1.5.3/nestor-1.5.3-source.zip" `
+     --title "Nestor 1.5.3" --notes-file docs/release-notes-1.5.3.md
    ```
 
    Onedir-сборку `dist/Nestor/` целиком в git не кладём (≈1.6 ГБ) — она
