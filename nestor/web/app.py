@@ -873,6 +873,11 @@ class Processor:
                         for label, value in recording.speaker_names.items()
                         if label in {s.speaker for s in recording.segments}
                     }
+                    recording.speaker_keep = [
+                        label
+                        for label in recording.speaker_keep
+                        if label in {s.speaker for s in recording.segments}
+                    ]
                 # Auto-split: undoes a chained mega-cluster when it is really two
                 # voices (same high barrier as the full pipeline; see speaker_merge)
                 if config.merge_split_min_segments > 0:
@@ -895,6 +900,9 @@ class Processor:
                         label_map.get(label, label): value
                         for label, value in recording.speaker_names.items()
                     }
+                    recording.speaker_keep = [
+                        label_map.get(label, label) for label in recording.speaker_keep
+                    ]
                     recording.speaker_match = {
                         label_map.get(label, label): value
                         for label, value in recording.speaker_match.items()
@@ -2015,6 +2023,13 @@ def create_app(
                     status_code=400, detail="«speaker_names» должен быть объектом"
                 )
             recording.speaker_names = {str(k): str(v) for k, v in names.items()}
+        keep = payload.get("speaker_keep")
+        if keep is not None:
+            if not isinstance(keep, list):
+                raise HTTPException(
+                    status_code=400, detail="«speaker_keep» должен быть списком"
+                )
+            recording.speaker_keep = [str(label) for label in keep]
         # the records table sends title/notes here too: accept them, otherwise
         # a rename via PUT silently did nothing
         if "title" in payload:
@@ -2085,6 +2100,9 @@ def create_app(
             recording.speaker_names[into] = from_name
         recording.speaker_names.pop(from_label, None)
         recording.speaker_match.pop(from_label, None)
+        recording.speaker_keep = [
+            label for label in recording.speaker_keep if label != from_label
+        ]
         # the embedding cache holds the old labels' means - drop it so the
         # next "remember voice" rebuilds the target's voice from all segments
         (lib.embeddings_dir / f"{record_id}.npz").unlink(missing_ok=True)

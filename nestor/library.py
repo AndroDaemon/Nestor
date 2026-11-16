@@ -89,6 +89,10 @@ class Recording:
     # diagnostics of the last run: hardware, resolved threads, pinning, settings
     run_meta: Dict[str, object] = field(default_factory=dict)
     speaker_names: Dict[str, str] = field(default_factory=dict)
+    # labels the user explicitly pulled OUT of the "Фон" group: a label with one
+    # or two utterances is grouped as a fragment automatically, so without this
+    # list the "return to speakers" button would be undone by the next render
+    speaker_keep: List[str] = field(default_factory=list)
     # label -> {assigned_name, confidence, candidates, reason} (voiceprints)
     speaker_match: Dict[str, dict] = field(default_factory=dict)
     # settings of the (last) transcription job - prefill the "process again" dialog
@@ -139,6 +143,7 @@ class Recording:
             stage_seconds=dict(data.get("stage_seconds", {}) or {}),
             run_meta=dict(data.get("run_meta", {}) or {}),
             speaker_names=dict(data.get("speaker_names", {})),
+            speaker_keep=[str(label) for label in data.get("speaker_keep", []) or []],
             speaker_match=dict(data.get("speaker_match", {}) or {}),
             job_settings=dict(data.get("job_settings", {}) or {}),
             source_path=data.get("source_path"),

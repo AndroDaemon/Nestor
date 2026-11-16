@@ -1162,6 +1162,7 @@ const state = {
   segSelAnchor: null,  // last clicked segment: the anchor for shift+click ranges
   bgClosed: true,      // «Фон» группа в панели спикеров свёрнута
   bgPickMode: false,   // включён режим «Похоже на фон»: клики по строкам помечают фон
+  keep: [],            // ярлыки, которые пользователь вернул в спикеры (не фон)
   colorIndex: {},      // speaker id -> stable colour slot (assigned on first sight)
   nextColor: 0,        // next free colour slot
   voiceprints: [],     // saved voices: {slug, name, ...}
@@ -2090,6 +2091,7 @@ async function openRecording(id) {
   const rec = await (await fetch('/api/recordings/' + id)).json();
   state.current = rec;
   state.names = Object.assign({}, rec.speaker_names || {});
+  state.keep = (rec.speaker_keep || []).slice();
   state.match = Object.assign({}, rec.speaker_match || {});
   state.savedVoices = {};
   state.speakers = [];
@@ -2230,16 +2232,24 @@ function sortChips() {
 const BG_MAX_SEGMENTS = 3;  // ярлык с таким числом реплик считается осколком/фоном
 const BG_TOKEN = /^(шум|шум\w*|noise|фон|background)$/i;
 
-/* Ярлыки, которые сейчас считаются «фоном». */
+/* Ярлыки, которые сейчас считаются «фоном». Ярлык, который пользователь уже
+   вернул в спикеры (state.keep), больше не группируется — даже если у него
+   всего одна реплика. */
 function backgroundIds() {
   if (!state.current) return new Set();
   const counts = speakerCounts();
   const ids = new Set();
   for (const id of state.speakers) {
+    if (isKept(id)) continue;
     const name = (state.names[id] || '').trim();
     if (BG_TOKEN.test(name) || (counts[id] || 0) <= BG_MAX_SEGMENTS) ids.add(id);
   }
   return ids;
+}
+
+/* Ярлык явно возвращён пользователем в обычный список спикеров. */
+function isKept(id) {
+  return Array.isArray(state.keep) && state.keep.includes(id);
 }
 
 /* Есть ли у записи фон вообще — от этого зависит, показывать ли ветку. */
@@ -2299,12 +2309,15 @@ function setBackgroundLabel(id, isBg) {
   snapshot();
   const name = (state.names[id] || '').trim();
   if (isBg) {
+    state.keep = (state.keep || []).filter((x) => x !== id);
     if (!name) state.names[id] = 'Фон';
     else if (!BG_TOKEN.test(name)) state.names[id] = `Фон: ${name}`;
   } else {
     // снять пометку: убрать служебный «Фон» / «Фон: », оставив исходное имя
     const m = /^фон\s*:?\s*/i.exec(name);
     state.names[id] = m ? name.slice(m[0].length).trim() : '';
+    // запоминаем решение: короткий ярлык иначе снова уедет в «Фон» по числу реплик
+    if (!state.keep.includes(id)) state.keep.push(id);
     state.bgPickMode = false;
   }
   markDirty();
@@ -2342,6 +2355,7 @@ function scopeBackgroundMark(ids) {
   if (!targets.length) return;
   snapshot();  // одна запись в истории на всё действие
   for (const id of targets) {
+    state.keep = (state.keep || []).filter((x) => x !== id);
     const name = (state.names[id] || '').trim();
     state.names[id] = BG_TOKEN.test(name) ? name : (name ? `Фон: ${name}` : 'Фон');
   }
@@ -2533,7 +2547,7 @@ function appendBgRow(box, id, counts, nameCounts, maxCount) {
   back.type = 'button';
   back.className = 'chip-merge';
   back.textContent = '↩';
-  back.dataset.tip = 'Вернуть в список спикеров (это не фон)';
+  back.dataset.tip = 'Вернуть в список спикеров (это не фон) — решение запомнится';
   back.onclick = () => setBackgroundLabel(id, false);
   row.appendChild(back);
   const meta = document.createElement('div');
@@ -2621,6 +2635,7 @@ function showVoiceMergeChoice(btn, id, name, twins, onSaved) {
         if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
         state.current = data;
         state.names = Object.assign({}, data.speaker_names || {});
+        state.keep = (data.speaker_keep || []).slice();
         state.match = Object.assign({}, data.speaker_match || {});
         state.speakers = state.speakers.filter(x => x !== twin);
         if (!state.names[into]) state.names[into] = name;
@@ -2835,6 +2850,7 @@ function showMergePopup(anchor, fromLabel, speakers) {
       snapshot();  // merge is a local edit too - offer a one-click undo
       const before = {
         current: state.current, names: { ...state.names }, match: { ...state.match },
+        keep: (state.keep || []).slice(),
         speakers: [...state.speakers], savedVoices: { ...state.savedVoices },
       };
       try {
@@ -2847,6 +2863,7 @@ function showMergePopup(anchor, fromLabel, speakers) {
         if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
         state.current = data;
         state.names = Object.assign({}, data.speaker_names || {});
+        state.keep = (data.speaker_keep || []).slice();
         state.match = Object.assign({}, data.speaker_match || {});
         state.speakers = state.speakers.filter(id => id !== fromLabel);
         sortChips();
@@ -2854,6 +2871,7 @@ function showMergePopup(anchor, fromLabel, speakers) {
           // the server moved the segments; undo locally and push the result back
           state.current = before.current;
           state.names = before.names;
+          state.keep = before.keep;
           state.match = before.match;
           state.speakers = before.speakers;
           state.savedVoices = before.savedVoices;
@@ -3765,6 +3783,7 @@ function syncSpeakersFromSegments() {
   for (const id of Object.keys(state.names)) {
     if (!live.has(id)) delete state.names[id];
   }
+  state.keep = (state.keep || []).filter((id) => live.has(id));
   for (const id of Object.keys(state.match)) {
     if (!live.has(id)) delete state.match[id];
   }
@@ -3779,6 +3798,7 @@ function snapshotString() {
   return JSON.stringify({
     segments: state.current.segments,
     names: state.names,
+    keep: state.keep || [],
     match: state.match,
     savedVoices: state.savedVoices,
   });
@@ -3814,6 +3834,7 @@ function restoreSnapshot(snap) {
   // restore the naming state too: a reassignment prunes the name of a label
   // that lost its last segment, and undo must bring that name back
   state.names = snap.names || {};
+  state.keep = snap.keep || [];
   state.match = snap.match || {};
   state.savedVoices = snap.savedVoices || state.savedVoices || {};
   pruneSelection();
@@ -3936,6 +3957,7 @@ function savePayload() {
   return JSON.stringify({
     segments: state.current.segments,
     speaker_names: state.names,
+    speaker_keep: state.keep || [],
   });
 }
 

@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -167,6 +168,43 @@ def test_put_keeps_names_when_composition_unchanged(tmp_path):
     )
     assert result["speaker_names"] == {"SPEAKER_00": "Иван", "SPEAKER_01": "Мария"}
     assert npz.exists()
+
+
+# ------------------------------------------- "return from Фон" is remembered
+def test_put_stores_and_returns_speaker_keep(tmp_path):
+    """The list of labels pulled out of the "Фон" group survives save/load."""
+    library = Library(tmp_path)
+    _recording_with_cache(library)
+    app = app_module.create_app(work_dir=tmp_path)
+
+    result = _put(
+        app,
+        "rec1",
+        {
+            "segments": [
+                {"id": "s1", "start": 0, "end": 2, "speaker": "SPEAKER_00", "text": "привет"},
+                {"id": "s2", "start": 2, "end": 4, "speaker": "SPEAKER_01", "text": "пока"},
+            ],
+            "speaker_names": {"SPEAKER_00": "Иван"},
+            "speaker_keep": ["SPEAKER_01"],
+        },
+    )
+    assert result["speaker_keep"] == ["SPEAKER_01"]
+    assert library.load("rec1").speaker_keep == ["SPEAKER_01"]
+
+    # a later save without the field leaves the stored decision alone
+    _put(app, "rec1", {"speaker_names": {"SPEAKER_00": "Иван"}})
+    assert library.load("rec1").speaker_keep == ["SPEAKER_01"]
+
+
+def test_put_rejects_malformed_speaker_keep(tmp_path):
+    library = Library(tmp_path)
+    _recording_with_cache(library)
+    app = app_module.create_app(work_dir=tmp_path)
+
+    with pytest.raises(HTTPException) as exc:
+        _put(app, "rec1", {"speaker_keep": "SPEAKER_01"})
+    assert exc.value.status_code == 400
 
 
 # --------------------------------------------------------------- list cache
