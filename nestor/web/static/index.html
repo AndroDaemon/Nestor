@@ -445,11 +445,20 @@
   /* sheet */
   /* Расшифровка занимает всё место между «Записями» и спикерами: у листа нет
      ограничения ширины и центрирования, поэтому поля по бокам не пустуют. */
-  .sheet { padding: 0 18px 26px; }
-  /* Заголовок записи и её итог не уезжают при прокрутке расшифровки. */
+  /* Лист записи — самостоятельная область: расшифровка и столбец спикеров
+     прокручиваются независимо друг от друга, а страница под ними не ездит.
+     Раньше прокручивался весь лист, поэтому последние чипы спикеров уходили
+     вниз вместе с текстом. */
+  #sheet-view { overflow: hidden; display: flex; flex-direction: column; }
+  .sheet {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+    padding: 0 18px 0;
+  }
+  /* Заголовок записи и её итог не уезжают при прокрутке расшифровки:
+     шапка стоит вне области прокрутки (.sheet-main) и не сжимается. */
   .sheet-head {
+    flex: none;
     display: flex; align-items: flex-start; gap: 14px;
-    position: sticky; top: 0; z-index: 9;
     padding: 14px 0 10px; margin-bottom: 4px;
     background: var(--bg); border-bottom: 1px solid var(--line);
   }
@@ -473,13 +482,19 @@
      (порядок: Записи — расшифровка — спикеры): список не переносится по
      строкам, поэтому «убегающих» чипов больше нет. Панель сортируется по
      числу реплик, внутри — своя прокрутка. */
-  .sheet-body { display: flex; gap: 18px; align-items: flex-start; }
-  .sheet-main { flex: 1 1 auto; min-width: 0; }
+  .sheet-body {
+    display: flex; gap: 18px; align-items: stretch;
+    flex: 1 1 auto; min-height: 0;
+  }
+  .sheet-main {
+    flex: 1 1 auto; min-width: 0; min-height: 0;
+    overflow-y: auto; padding: 0 6px 22px 0;
+  }
   .speakers-panel {
-    flex: none; width: 224px; position: sticky; top: 84px;
+    flex: none; width: 224px; align-self: stretch;
     display: flex; flex-direction: column; gap: 3px;
-    max-height: calc(100vh - 150px); overflow-y: auto;
-    padding: 6px; background: var(--bg-2);
+    min-height: 0; overflow-y: auto;
+    padding: 6px 6px 10px; margin-bottom: 12px; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 10px;
   }
   .speakers-panel::-webkit-scrollbar { width: 6px; }
@@ -1133,6 +1148,7 @@ const state = {
   dirty: false,
   saveTimer: null,
   poll: null,
+  pollBusy: false,     // a poll is in flight: never start a second one
   follow: true,
   activeId: null,      // id of the segment currently being played
   activeHolding: false, // true while the frame sits on the last finished segment (pause)
@@ -2128,6 +2144,11 @@ async function openRecording(id) {
     s.textContent = b;
     sub.appendChild(s);
   }
+  // «узнал X из Y»: сколько спикеров уже носят имя. Обновляется на месте при
+  // переименовании и распознавании (refreshKnownSpeakers из renderChips).
+  const known = document.createElement('span');
+  known.id = 'rec-known';
+  sub.appendChild(known);
 
   audio.src = withToken('/api/recordings/' + id + '/media');
   audio.load();
@@ -2148,6 +2169,38 @@ function speakerCounts() {
     counts[seg.speaker] = (counts[seg.speaker] || 0) + 1;
   }
   return counts;
+}
+
+/* Сколько спикеров уже с именем: узнаны по голосовой библиотеке или названы
+   вручную. Служебная группа «Фон» не в счёт — это не участники. */
+function namedSpeakers() {
+  const bg = backgroundIds();
+  let known = 0;
+  let total = 0;
+  for (const id of state.speakers) {
+    if (bg.has(id)) continue;
+    total += 1;
+    const named = (state.names[id] || '').trim();
+    const matched = state.match[id] && state.match[id].assigned_name;
+    if (named || matched) known += 1;
+  }
+  return { known, total };
+}
+
+/* Подпись «узнал 8 из 20» в строке под заголовком записи. Живёт вместе с
+   чипами: распознавание и переименование обновляют её сразу, без перезагрузки. */
+function refreshKnownSpeakers() {
+  const el = $('rec-known');
+  if (!el) return;
+  const { known, total } = namedSpeakers();
+  if (!state.current || !total) {
+    el.textContent = '';
+    return;
+  }
+  el.textContent = `узнал ${known} из ${total} спикеров`;
+  el.dataset.tip = known >= total
+    ? 'Все спикеры названы'
+    : `Спикеров: ${total}. С именем: ${known} — распознаны по голосу или названы вручную`;
 }
 
 /* Busiest speakers first: a person with 40 utterances is what the user is
@@ -2455,6 +2508,7 @@ function renderChips() {
   }
 
   renderResultBar();
+  refreshKnownSpeakers();
 }
 
 /* Строка ярлыка внутри группы «Фон»: имя, число реплик, вернуть в спикеры. */
@@ -4366,7 +4420,7 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
 
 async function watch() {
   clearInterval(state.poll);
-  state.poll = setInterval(async () => {
+  const tick = async () => {
     await loadRail();  // refreshes state.recordings, the rail and the activity widget
     let finished = null;
     for (const id of [...state.pending]) {
@@ -4410,6 +4464,13 @@ async function watch() {
     // keep polling while this session has uploads in flight *or* the server is
     // still busy with a job started before the window was reloaded
     if (!state.pending.length && !state.recordings.some(isWorking)) clearInterval(state.poll);
+  };
+  // A slow answer must not stack up requests: the window then waits behind a
+  // queue of its own polls and looks frozen even though the server is alive.
+  state.poll = setInterval(() => {
+    if (state.pollBusy) return;
+    state.pollBusy = true;
+    tick().finally(() => { state.pollBusy = false; });
   }, 1200);
 }
 
@@ -5304,7 +5365,10 @@ $('btn-help').onclick = () => {
      трёх реплик) и всё, что названо «шум»/«фон» — обычно это не участники, а
      разговоры в глубине комнаты. Раскройте её, чтобы посмотреть; кнопка <b>↩</b>
      возвращает ярлык в список, а <b>«+»</b> включает режим пометки фона — щёлкайте
-     по репликам в тексте. Ничего не удаляется, текст не меняется. Поиск
+     по репликам в тексте. Ничего не удаляется, текст не меняется. Расшифровка и
+     столбец спикеров прокручиваются независимо, а заголовок записи остаётся на
+     месте; в нём же видно, сколько спикеров уже названо — «узнал 4 из 6
+     спикеров» (группа «Фон» в счёт не идёт). Поиск
      подсвечивает найденное в тексте, Enter переходит к следующему совпадению.</p>
   <p><b>Клавиши</b>: пробел — играть/пауза, ←/→ — назад/вперёд на 5 секунд,
      <b>J</b>/<b>K</b> — следующая/предыдущая реплика, <b>Enter</b> — проиграть

@@ -43,7 +43,9 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from .. import align, cpuinfo, speaker_embed
 from ..audio import decode, duration, write_wav
+from ..audio_io import decode_to_wav_16k
 from ..constants import SAMPLE_RATE
+from ..decode_worker import decode_source_to_cache
 from ..config import DEFAULT_ASR_MODEL, Config
 from ..exporters import transcript_from_recording
 from ..glossary import (
@@ -1193,10 +1195,98 @@ def _settings_snapshot(config: Config) -> Dict[str, object]:
 
 WAVEFORM_CACHE_NAME = "audio16k.wav"
 
+# Building the cache in a child process keeps the window responsive: the
+# decoder no longer competes with the HTTP server for the same GIL. Set
+# NESTOR_DECODE_SUBPROCESS=0 to force the old in-process path.
+DECODE_SUBPROCESS_ENV = "NESTOR_DECODE_SUBPROCESS"
+
 
 def waveform_cache_path(library: Library, record_id: str) -> Path:
     """Where the decoded 16 kHz mono waveform of a recording is cached."""
     return library.output_dir / record_id / WAVEFORM_CACHE_NAME
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _read_progress(path: Path) -> Optional[float]:
+    """Fraction written by the decoder child, or None while it is still silent."""
+    try:
+        text = path.read_text(encoding="ascii").strip()
+        return float(text) if text else None
+    except (OSError, ValueError):
+        return None
+
+
+def _decode_in_subprocess_enabled() -> bool:
+    value = os.environ.get(DECODE_SUBPROCESS_ENV, "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _decode_via_child(
+    source: Path,
+    dest: Path,
+    on_progress=None,
+) -> bool:
+    """Decode ``source`` into ``dest`` in a separate process.
+
+    Returns True when a non-empty file was written. Every failure — the
+    platform cannot spawn, the child crashed, the file came out empty — returns
+    False so the caller decodes in-process instead. Losing the responsive
+    window is annoying; losing the job is not acceptable.
+
+    The child reports progress through a small text file rather than a pipe:
+    the result is a file anyway, so the only thing crossing the process border
+    is a number between 0 and 1.
+    """
+    import multiprocessing
+
+    progress = dest.with_name(dest.name + ".progress")
+    _unlink(progress)
+    try:
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(
+            target=decode_source_to_cache,
+            args=(str(source), str(dest), str(progress)),
+            name="nestor-decode",
+            daemon=True,
+        )
+        proc.start()
+    except Exception:  # noqa: BLE001 - frozen/spawn may be unavailable
+        _unlink(progress)
+        return False
+
+    reported = -1
+    try:
+        while proc.is_alive():
+            proc.join(0.25)
+            if on_progress is None:
+                continue
+            done = _read_progress(progress)
+            if done is not None:
+                percent = int(done * 100)
+                if percent > reported:
+                    reported = percent
+                    on_progress(min(0.999, done))
+    except BaseException:
+        # The job was cancelled or the server is shutting down.
+        proc.terminate()
+        proc.join(5)
+        _unlink(progress)
+        raise
+
+    code = proc.exitcode
+    _unlink(progress)
+    if code != 0 or not dest.exists() or dest.stat().st_size <= 44:
+        _unlink(dest)
+        return False
+    if on_progress is not None:
+        on_progress(1.0)
+    return True
 
 
 def load_or_decode(
@@ -1212,6 +1302,13 @@ def load_or_decode(
     Sources are immutable after import (the upload is copied into the
     library), so a cache keyed by record id never goes stale. The cache is
     removed together with the recording by ``Library.delete``.
+
+    Decoding writes the wav itself, in a child process, and the waveform is
+    read back from that file. Two things follow: the decoded audio never exists
+    as one giant float32 array built up from hundreds of thousands of chunks,
+    and the decode cannot freeze the window (own process, below normal
+    priority). The first run also sees exactly the same samples as every later
+    one, because both come from the cache.
     """
     cache = waveform_cache_path(library, recording.id)
     if cache.exists():
@@ -1229,12 +1326,65 @@ def load_or_decode(
             return decode(cache), True
         except Exception:  # noqa: BLE001 - fall through to a fresh decode
             pass
+
     source = library.recording_source(recording)
-    waveform = decode(source, on_progress=on_decode)
+    partial = cache.with_name(cache.name + ".part")
+    built = False
+    child_used = False
     try:
-        write_wav(cache, waveform)
+        child_used = _decode_in_subprocess_enabled() and _decode_via_child(
+            source, partial, on_decode
+        )
+        built = child_used
+    except Exception:  # noqa: BLE001 - the fast path must never fail a job
+        built = False
+        child_used = False
+
+    if not built:
+        try:
+            decode_to_wav_16k(source, partial, on_progress=on_decode)
+            built = True
+        except Exception:  # noqa: BLE001 - last resort: decode into memory
+            _unlink(partial)
+            waveform = decode(source, on_progress=on_decode)
+            try:
+                write_wav(cache, waveform)
+            except OSError:
+                pass  # cache is an optimization, never a requirement
+            return waveform, False
+
+    try:
+        partial.replace(cache)
+        built_path = cache
     except OSError:
-        pass  # cache is an optimization, never a requirement
+        # Could not move the file into place: read it where it lies.
+        built_path = partial
+
+    try:
+        size_kb = built_path.stat().st_size // 1024
+        library.log(
+            f"decode {recording.id}: "
+            + ("child process" if child_used else "in-process")
+            + f", {size_kb} KB"
+        )
+    except OSError:
+        pass
+
+    try:
+        import soundfile as sf
+
+        waveform, sample_rate = sf.read(
+            str(built_path), dtype="float32", always_2d=False
+        )
+        if sample_rate == SAMPLE_RATE and waveform.ndim == 1:
+            if built_path != cache:
+                _unlink(built_path)
+            return waveform, False
+    except Exception:  # noqa: BLE001 - fall back to the PyAV read
+        pass
+    waveform = decode(built_path)
+    if built_path != cache:
+        _unlink(built_path)
     return waveform, False
 
 

@@ -19,6 +19,167 @@ class AudioDecodeError(RuntimeError):
     """Raised when audio cannot be decoded via PyAV."""
 
 
+def _decode_into(
+    path: Union[str, Path],
+    sink: Callable[[np.ndarray], None],
+    on_progress: Optional[Callable[[float], None]] = None,
+    on_total: Optional[Callable[[Optional[int]], None]] = None,
+) -> int:
+    """Decode ``path`` to mono float32 @ 16 kHz, handing blocks to ``sink``.
+
+    Nothing is accumulated here: the caller decides whether to fill a
+    preallocated array or stream straight to disk. ``sink`` receives the blocks
+    in order; they are views on freshly allocated frame buffers, so they stay
+    valid after the callback returns.
+
+    ``on_total`` is called once, before the first block, with the number of
+    samples the container reports (``None`` when unknown). That is what lets
+    the array path size its buffer up front instead of growing a list of 200
+    thousand chunks and joining them at the end.
+
+    Returns the total number of decoded samples.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise AudioDecodeError(f"Input file does not exist: {path}")
+
+    frame_count = 0
+    try:
+        container = av.open(str(path))
+    except (av.AVError, FileNotFoundError, OSError) as exc:
+        raise AudioDecodeError(f"Failed to open container {path}: {exc}") from exc
+
+    try:
+        audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+        if audio_stream is None:
+            raise AudioDecodeError(f"No audio stream found in {path}")
+
+        total_samples: Optional[int] = None
+        try:
+            if audio_stream.duration is not None and audio_stream.time_base:
+                seconds = float(audio_stream.duration * audio_stream.time_base)
+            elif container.duration is not None:
+                seconds = float(container.duration) / 1_000_000
+            else:
+                seconds = 0.0
+            if seconds > 0:
+                total_samples = int(seconds * SAMPLE_RATE)
+        except (TypeError, ValueError, ZeroDivisionError):
+            total_samples = None
+
+        if on_total is not None:
+            on_total(total_samples)
+
+        # Resampler: input format/layout/rate -> output float32 mono 16000
+        resampler = av.AudioResampler(
+            format="flt",      # float32
+            layout="mono",     # 1 channel
+            rate=SAMPLE_RATE,
+        )
+
+        decoded = 0
+        next_report = 0.0
+        next_yield = 2 * SAMPLE_RATE  # hand the GIL over every 2 s of audio
+
+        def push(frames) -> None:
+            nonlocal decoded, next_report, next_yield
+            for rframe in frames:
+                arr = rframe.to_ndarray(format="flt")  # (channels, samples)
+                if arr.shape[0] != 1:
+                    raise AudioDecodeError(
+                        f"Expected mono after resampling, got shape {arr.shape}"
+                    )
+                block = arr[0]
+                decoded += block.shape[0]
+                sink(block)
+                if on_progress is not None and total_samples:
+                    fraction = decoded / total_samples
+                    if fraction >= next_report:
+                        next_report = fraction + 0.01
+                        on_progress(min(0.999, max(0.0, fraction)))
+                if decoded >= next_yield:
+                    # The UI is served from another thread of this process
+                    # (desktop mode): a voluntary yield here keeps the window
+                    # answering instead of waiting for the decoder's turn.
+                    next_yield = decoded + 2 * SAMPLE_RATE
+                    time.sleep(0)
+
+        try:
+            for frame in container.decode(audio_stream):
+                frame_count += 1
+                push(resampler.resample(frame))
+        except av.AVError as exc:
+            raise AudioDecodeError(f"Decoding error in {path}: {exc}") from exc
+
+        # Flush resampler (PyAV 12+: resample(None) may raise; guard it)
+        try:
+            push(resampler.resample(None))
+        except (AttributeError, TypeError, av.AVError):
+            pass
+
+        return decoded
+    finally:
+        container.close()
+
+
+def decode_to_wav_16k(
+    path: Union[str, Path],
+    dest: Union[str, Path],
+    on_progress: Optional[Callable[[float], None]] = None,
+) -> int:
+    """Decode ``path`` straight into a 16 kHz mono PCM_16 wav at ``dest``.
+
+    This is the cache-building path of the desktop app. Writing as we decode
+    means the decoded waveform never exists as one giant float32 array: a
+    five-hour recording used to need 1.2 GB for the chunks plus another 1.2 GB
+    for the joined copy, and both had to be freed before the pipeline started.
+
+    Returns the number of written samples. An empty result is an error and the
+    half-written file is removed.
+    """
+    import soundfile as sf
+
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    total = 0
+    try:
+        with sf.SoundFile(
+            str(dest),
+            mode="w",
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            subtype="PCM_16",
+            # The cache is first written as "<name>.wav.part", and soundfile
+            # refuses to guess a format from that extension.
+            format="WAV",
+        ) as handle:
+            def sink(block: np.ndarray) -> None:
+                piece = block
+                if piece.size and (float(piece.min()) < -1.0 or float(piece.max()) > 1.0):
+                    # Resampler overshoot on correlated stereo: keep PCM_16 in range
+                    # instead of letting the value wrap around.
+                    piece = np.clip(piece, -1.0, 1.0)
+                handle.write(piece)
+
+            total = _decode_into(path, sink, on_progress=on_progress)
+    except BaseException:
+        # A half-written wav must never be mistaken for a finished cache.
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        raise
+
+    if total == 0:
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        raise AudioDecodeError(f"Decoded audio is empty: {path}")
+    return total
+
+
 def decode_to_mono_16k(
     path: Union[str, Path],
     on_progress: Optional[Callable[[float], None]] = None,
@@ -53,103 +214,51 @@ def decode_to_mono_16k(
     coefficients + sinc-filter overshoot. If observed, add optional `clip=True`
     parameter to apply `np.clip(waveform, -1.0, 1.0)` at the end (default off).
     """
-    path = Path(path)
-    if not path.exists():
-        raise AudioDecodeError(f"Input file does not exist: {path}")
+    started = time.perf_counter()
+    state: dict = {"buf": None, "pos": 0}
+    spare: list = []
 
-    t0 = time.perf_counter()
-    frame_count = 0
+    def on_total(expected: Optional[int]) -> None:
+        if expected and expected > 0:
+            # One second of slack: containers often round the reported duration
+            # down, and growing a multi-hour buffer is what we want to avoid.
+            state["buf"] = np.empty(expected + SAMPLE_RATE, dtype=np.float32)
 
-    try:
-        container = av.open(str(path))
-    except (av.AVError, FileNotFoundError, OSError) as exc:
-        raise AudioDecodeError(f"Failed to open container {path}: {exc}") from exc
+    def sink(block: np.ndarray) -> None:
+        buf = state["buf"]
+        if buf is None:
+            # Duration unknown (rare: some raw formats): fall back to chunks.
+            spare.append(block)
+            return
+        pos = state["pos"]
+        n = block.shape[0]
+        if pos + n > buf.shape[0]:
+            grown = np.empty(max(buf.shape[0] * 2, pos + n), dtype=np.float32)
+            grown[:pos] = buf[:pos]
+            buf = grown
+            state["buf"] = buf
+        buf[pos:pos + n] = block
+        state["pos"] = pos + n
 
-    try:
-        # Select first audio stream
-        audio_stream = next((s for s in container.streams if s.type == "audio"), None)
-        if audio_stream is None:
-            raise AudioDecodeError(f"No audio stream found in {path}")
+    total = _decode_into(path, sink, on_progress=on_progress, on_total=on_total)
 
-        # Rough decoded-fraction estimation: the container usually reports the
-        # stream duration in seconds (may be None for some raw formats).
-        total_samples: Optional[float] = None
-        try:
-            stream_duration = audio_stream.duration
-            if stream_duration is None:
-                stream_duration = container.duration
-            if stream_duration is not None:
-                # both are in AV_TIME_BASE (1e-6) units for container.duration;
-                # stream.duration uses the stream time_base - normalize both
-                if audio_stream.duration is not None and audio_stream.time_base:
-                    total_seconds = float(audio_stream.duration * audio_stream.time_base)
-                else:
-                    total_seconds = float(stream_duration) / 1_000_000
-                total_samples = total_seconds * SAMPLE_RATE
-        except (TypeError, ValueError, ZeroDivisionError):
-            total_samples = None
+    if total == 0:
+        raise AudioDecodeError(f"Decoded audio is empty: {path}")
 
-        # Resampler: input format/layout/rate -> output float32 mono 16000
-        resampler = av.AudioResampler(
-            format="flt",      # float32
-            layout="mono",     # 1 channel
-            rate=SAMPLE_RATE,
-        )
+    if state["buf"] is None:
+        waveform = np.concatenate(spare, dtype=np.float32)
+    else:
+        # A view, not a copy: the slice keeps the single big buffer as its base.
+        waveform = state["buf"][:state["pos"]]
 
-        chunks = []
-        decoded_samples = 0
-        next_report = 0.0
-        try:
-            for frame in container.decode(audio_stream):
-                frame_count += 1
-                resampled_frames = resampler.resample(frame)
-                for rframe in resampled_frames:
-                    arr = rframe.to_ndarray(format="flt")  # shape: (channels, samples)
-                    # PyAV returns (channels, samples); mono -> (1, n)
-                    if arr.shape[0] != 1:
-                        raise AudioDecodeError(
-                            f"Expected mono after resampling, got shape {arr.shape}"
-                        )
-                    chunks.append(arr[0])  # take channel 0
-                    decoded_samples += arr.shape[1]
-                    if on_progress is not None and total_samples:
-                        fraction = decoded_samples / total_samples
-                        if fraction >= next_report:
-                            next_report = fraction + 0.01
-                            on_progress(min(0.999, max(0.0, fraction)))
-        except av.AVError as exc:
-            raise AudioDecodeError(f"Decoding error in {path}: {exc}") from exc
-
-        # Flush resampler (PyAV 12+: resample(None) may raise; guard it)
-        try:
-            for rframe in resampler.resample(None):
-                arr = rframe.to_ndarray(format="flt")
-                if arr.shape[0] != 1:
-                    raise AudioDecodeError(
-                        f"Expected mono after flush, got shape {arr.shape}"
-                    )
-                chunks.append(arr[0])
-        except (AttributeError, TypeError, av.AVError):
-            # Flush not supported or no remaining data
-            pass
-
-        if not chunks:
-            raise AudioDecodeError(f"Decoded audio is empty: {path}")
-
-        waveform = np.concatenate(chunks, dtype=np.float32)
-
-        elapsed = time.perf_counter() - t0
-        duration_sec = waveform.shape[0] / SAMPLE_RATE
-        logger.debug(
-            "Decoded %s: %d frames -> %.3fs audio in %.3fs (%.1fx realtime)",
-            path.name, frame_count, duration_sec, elapsed,
-            duration_sec / elapsed if elapsed > 0 else float("inf"),
-        )
-
-        return waveform
-
-    finally:
-        container.close()
+    elapsed = time.perf_counter() - started
+    duration_sec = waveform.shape[0] / SAMPLE_RATE
+    logger.debug(
+        "Decoded %s -> %.3fs audio in %.3fs (%.1fx realtime)",
+        Path(path).name, duration_sec, elapsed,
+        duration_sec / elapsed if elapsed > 0 else float("inf"),
+    )
+    return waveform
 
 
 def get_duration(path: Union[str, Path]) -> float:
