@@ -2313,9 +2313,17 @@ function setBackgroundLabel(id, isBg) {
     if (!name) state.names[id] = 'Фон';
     else if (!BG_TOKEN.test(name)) state.names[id] = `Фон: ${name}`;
   } else {
-    // снять пометку: убрать служебный «Фон» / «Фон: », оставив исходное имя
-    const m = /^фон\s*:?\s*/i.exec(name);
-    state.names[id] = m ? name.slice(m[0].length).trim() : '';
+    // Снять пометку. Служебный префикс «Фон» / «Фон: » убираем, а если его не
+    // было (ярлык попал в группу сам — по числу реплик — и имя у него обычное,
+    // например «Манукян Герман» или узнанное по голосу), имя НЕ трогаем:
+    // раньше оно в этом случае затиралось в пустое и спикер выглядел как
+    // дефолтный SPEAKER_NN. Пустым имя становится только если ярлык и правда
+    // назывался «шум»/«фон».
+    let rest = name;
+    const m = /^фон\s*:?\s*/i.exec(rest);
+    if (m) rest = rest.slice(m[0].length).trim();
+    if (BG_TOKEN.test(rest)) rest = '';
+    state.names[id] = rest;
     // запоминаем решение: короткий ярлык иначе снова уедет в «Фон» по числу реплик
     if (!state.keep.includes(id)) state.keep.push(id);
     state.bgPickMode = false;
