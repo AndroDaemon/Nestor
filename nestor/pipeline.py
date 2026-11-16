@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Union
 
+import numpy as np
+
 from . import align, audio
 from . import speaker_embed, speaker_match, speaker_merge
 from .asr_onnx import SherpaOnnxAsr
@@ -28,6 +30,17 @@ CancelFn = Callable[[], bool]
 RESCUE_MIN_GAP = 2.0
 RESCUE_MAX_HOLE = 20.0
 RESCUE_CONTEXT = 0.7
+
+# A hole is worth re-decoding only when something is audible in it. Measurements
+# on hour-long meeting recordings showed that the loudest 20 ms frame of every
+# hole sits 6-20 dB above the room's own noise floor, and that the floor itself
+# is what the first ASR pass leaves unclaimed; a stretch that stays within a few
+# dB of the floor is not missed speech but breathing and paper rustle. The
+# threshold is deliberately generous - a distant participant who stepped away
+# from the microphone still clears it - so the pass keeps finding quiet speech
+# while dropping the pure-silence calls that cost seconds each.
+RESCUE_FLOOR_DB = 6.0
+RESCUE_FRAME_SECONDS = 0.02
 
 
 class JobCancelled(Exception):
@@ -68,6 +81,55 @@ def _asr_for(config: Config, report: ProgressFn, on_load: Optional[StageFn] = No
         return entry[0], entry[1], True
 
 
+def _frame_db(waveform: "np.ndarray") -> "np.ndarray":
+    """Per-frame level of the recording in dBFS (one value per 20 ms frame).
+
+    Reduced in blocks straight to a small per-frame vector, so a multi-hour
+    recording does not need a second full-length array.
+    """
+    frame = max(1, int(RESCUE_FRAME_SECONDS * SAMPLE_RATE))
+    n_frames = waveform.shape[0] // frame
+    if n_frames == 0:
+        return np.empty(0, dtype=np.float32)
+    db = np.empty(n_frames, dtype=np.float32)
+    block_frames = max(1, (1 << 16) // frame)
+    for first in range(0, n_frames, block_frames):
+        last = min(n_frames, first + block_frames)
+        rows = np.asarray(
+            waveform[first * frame:last * frame], dtype=np.float32
+        ).reshape(last - first, frame)
+        energy = np.einsum("ij,ij->i", rows, rows, dtype=np.float64)
+        db[first:last] = np.sqrt(energy / frame)
+    np.log10(np.maximum(db, 1e-6), out=db)
+    db *= 20.0
+    return db
+
+
+def _noise_floor_db(db: "np.ndarray") -> float:
+    """Level of the room's own noise: a low percentile of frame levels."""
+    if db.size == 0:
+        return -120.0
+    return float(np.percentile(db, 10))
+
+
+def _hole_is_audible(db: "np.ndarray", floor_db: float,
+                     gap_start: float, gap_end: float) -> bool:
+    """True when the loudest frame inside the hole rises above the room floor.
+
+    The edges are trimmed by ``RESCUE_CONTEXT``, otherwise the tail of the word
+    that borders the hole would answer for the hole itself.
+    """
+    frame = RESCUE_FRAME_SECONDS
+    first = int((gap_start + RESCUE_CONTEXT) / frame)
+    last = int((gap_end - RESCUE_CONTEXT) / frame)
+    first = max(0, min(first, db.size - 1))
+    last = max(first + 1, min(last, db.size))
+    if last <= first:
+        return False
+    peak = float(np.max(db[first:last]))
+    return peak - floor_db >= RESCUE_FLOOR_DB
+
+
 def _rescue_holes(
     waveform: "np.ndarray",
     words: List[Word],
@@ -82,6 +144,10 @@ def _rescue_holes(
     shorter than ``rescue_max_hole`` seconds between consecutive words may
     hide quiet speech the first pass missed. Each hole is re-decoded with a
     bit of context on both sides; anything new found there is spliced in.
+
+    Holes that stay at the recording's own noise floor are skipped: they are
+    pauses, not missed speech, and re-decoding them only invites the model to
+    invent words (and to pull in background talk from deep in the room).
     """
     holes: List[tuple] = []
     for prev_word, next_word in zip(words, words[1:]):
@@ -92,6 +158,23 @@ def _rescue_holes(
         if gap_end - gap_start > RESCUE_MAX_HOLE:
             continue
         holes.append((gap_start, gap_end))
+    if not holes:
+        return words
+
+    db = _frame_db(waveform)
+    floor_db = _noise_floor_db(db)
+    audible = [
+        (gap_start, gap_end)
+        for gap_start, gap_end in holes
+        if _hole_is_audible(db, floor_db, gap_start, gap_end)
+    ]
+    dropped = len(holes) - len(audible)
+    if dropped:
+        report(
+            f"  noise floor {floor_db:.1f} dB: skipped {dropped} hole(s) "
+            f"as pure silence"
+        )
+    holes = audible
     if not holes:
         return words
 

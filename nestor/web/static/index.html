@@ -1162,7 +1162,6 @@ const state = {
   segSelAnchor: null,  // last clicked segment: the anchor for shift+click ranges
   bgClosed: true,      // «Фон» группа в панели спикеров свёрнута
   bgPickMode: false,   // включён режим «Похоже на фон»: клики по строкам помечают фон
-  bgLastMark: null,    // undo-снимок перед последней пометкой фона (для кнопки «Отменить»)
   colorIndex: {},      // speaker id -> stable colour slot (assigned on first sight)
   nextColor: 0,        // next free colour slot
   voiceprints: [],     // saved voices: {slug, name, ...}
@@ -2317,13 +2316,13 @@ function setBackgroundLabel(id, isBg) {
 
 /* Режим «Похоже на фон»: фильтр по спикеру и обычный клик по строке —
    пометка. Слушатели вешаются один раз. */
-function toggleBgPick() {
-  state.bgPickMode = !state.bgPickMode;
+function toggleBgPick(force) {
+  state.bgPickMode = (force == null) ? !state.bgPickMode : !!force;
   state.filterSpeaker = null;
   document.body.classList.toggle('bg-pick', state.bgPickMode);
   renderChips();
   renderSegments();
-  if (state.bgPickMode) toast('Кликайте по строкам фона — они перейдут в «Фон»');
+  if (state.bgPickMode) toast('Кликайте по строкам фона — они перейдут в «Фон» (Esc — выйти)');
 }
 
 document.addEventListener('click', (e) => {
@@ -5365,7 +5364,8 @@ $('btn-help').onclick = () => {
      трёх реплик) и всё, что названо «шум»/«фон» — обычно это не участники, а
      разговоры в глубине комнаты. Раскройте её, чтобы посмотреть; кнопка <b>↩</b>
      возвращает ярлык в список, а <b>«+»</b> включает режим пометки фона — щёлкайте
-     по репликам в тексте. Ничего не удаляется, текст не меняется. Расшифровка и
+     по репликам в тексте (выключить — <b>Esc</b> или повторное «+»). Ничего не
+     удаляется, текст не меняется. Расшифровка и
      столбец спикеров прокручиваются независимо, а заголовок записи остаётся на
      месте; в нём же видно, сколько спикеров уже названо — «узнал 4 из 6
      спикеров» (группа «Фон» в счёт не идёт). Поиск
@@ -6069,6 +6069,7 @@ document.addEventListener('keydown', (e) => {
     $('modal').classList.add('hidden');
     $('export-menu').classList.add('hidden');
     hideJobMenu();
+    if (state.bgPickMode) { toggleBgPick(false); return; }
     if (state.segSel.size) { clearSegmentSelection(); return; }
     if (state.filterSpeaker) setSpeakerFilter(null);
     return;
