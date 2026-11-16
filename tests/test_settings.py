@@ -50,7 +50,7 @@ def test_merge_settings_roundtrip_and_validation(tmp_path):
     assert store.as_public()["merge_speakers"] is True
     assert store.as_public()["merge_min_weight"] == 1.5
     assert store.as_public()["merge_threshold"] == 0.45
-    assert store.as_public()["merge_segment_floor"] == 0.35
+    assert store.as_public()["merge_segment_floor"] == 0.5
     assert store.as_public()["diar_threshold"] == 0.5
 
     store.update({"merge_speakers": False, "merge_min_weight": 3.0})
@@ -100,6 +100,25 @@ def test_old_schema_migrated_to_new_diarization_defaults(tmp_path):
     assert store.as_public()["merge_segment_floor"] == DEFAULTS["merge_segment_floor"]
     assert store.as_public()["num_speakers"] == 3  # user values survive
     # the file is rewritten at the new schema version
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["schema_version"] == SCHEMA_VERSION
+
+
+def test_schema3_file_gets_the_raised_merge_floor(tmp_path):
+    """A 1.5.x file carries segment_floor=0.35 explicitly; the migration lifts it.
+
+    Without the reset the old value would keep folding two voices together,
+    because a settings file wins over the defaults.
+    """
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {"schema_version": 3, "merge_segment_floor": 0.35, "num_speakers": 2}
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(tmp_path)
+    assert store.as_public()["merge_segment_floor"] == DEFAULTS["merge_segment_floor"]
+    assert store.as_public()["num_speakers"] == 2  # other user values survive
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["schema_version"] == SCHEMA_VERSION
 

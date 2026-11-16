@@ -74,8 +74,11 @@ class Config:
     # Segment-agreement floor for the merge pass: a small cluster is only
     # folded into a bigger one when the individual utterances really are that
     # close (their mean cosine to the target's centroid). Without it a real
-    # meeting can collapse into a single speaker.
-    merge_segment_floor: float = 0.35
+    # meeting can collapse into a single speaker. Measured on real recordings:
+    # 0.35 let a two-person talk collapse into one label holding 71% of the
+    # words; 0.5 keeps the voices apart (43%) and leaves a plain "star" meeting
+    # untouched. The price - more small labels - is covered by the "Фон" group.
+    merge_segment_floor: float = 0.5
     # Strict-cohesion guard (opt-in, 0.0 = off): refuse any merge whose group
     # ends up internally inhomogeneous (mean cosine of its own segments to the
     # merged centroid below this). Trades a giant chained "speaker" for more,

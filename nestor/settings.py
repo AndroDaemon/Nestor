@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SETTINGS_FILE = "settings.json"
 
 # key -> (kind, constraint); anything not listed here is ignored on update.
@@ -38,7 +38,8 @@ SCHEMA: Dict[str, Tuple[str, object]] = {
     "merge_speakers": ("bool", None),
     "merge_threshold": ("float", (0.0, 1.0)),
     "merge_min_weight": ("float", (0.0, 30.0)),
-    # segment-agreement floor for the merge pass (0 = old lenient behaviour)
+    # segment-agreement floor for the merge pass (0 = old lenient behaviour);
+    # 0.5 keeps two similar voices apart where 0.35 collapsed them into one
     "merge_segment_floor": ("float", (0.0, 1.0)),
     # strict-cohesion guard for the merge pass (opt-in, 0 = off): refuse merges
     # that would leave the group internally inhomogeneous
@@ -83,7 +84,7 @@ DEFAULTS: Dict[str, object] = {
     "merge_speakers": True,
     "merge_threshold": 0.45,
     "merge_min_weight": 1.5,
-    "merge_segment_floor": 0.35,
+    "merge_segment_floor": 0.5,
     "merge_min_coh": 0.0,
     "audio_enhance": True,
     "diar_threshold": 0.5,
@@ -176,12 +177,19 @@ class SettingsStore:
         2 -> 3: the merge pass gained an opt-in strict-cohesion guard
         (``merge_min_coh``); older files simply take the default (off), and a
         large-cluster auto-split was added that is always on.
+
+        3 -> 4: the segment-agreement floor was raised from 0.35 to 0.5.
+        Measurements on real recordings showed 0.35 folded a two-person talk
+        into a single label holding 71% of the words, while 0.5 keeps the
+        voices apart; files written earlier carry the old value explicitly.
         """
         if from_version < 2:
             self._data["diar_threshold"] = DEFAULTS["diar_threshold"]
             self._data["merge_segment_floor"] = DEFAULTS["merge_segment_floor"]
         if from_version < 3:
             self._data["merge_min_coh"] = DEFAULTS["merge_min_coh"]
+        if from_version < 4:
+            self._data["merge_segment_floor"] = DEFAULTS["merge_segment_floor"]
         with self._lock:
             self._write()
 
