@@ -19,15 +19,40 @@ import numpy as np
 from .models import ensure_local_diarization, local_diarization_models
 from .types import Turn
 
+# A block below this RMS level holds nothing to diarize. Long recordings made
+# with a paused dictaphone or a muted call contain hours of digital silence; at
+# -70 dBFS there is no speech at all, so skipping the block saves minutes of
+# work and keeps pyannote from reading the noise floor as a speaker.
+SILENT_BLOCK_DB = -70.0
+
+
+def block_level_db(samples: np.ndarray) -> float:
+    """RMS level of a block in dBFS (``-120`` for silence or an empty block)."""
+    if samples.size == 0:
+        return -120.0
+    energy = float(np.dot(samples, samples)) / float(samples.size)
+    return 10.0 * float(np.log10(energy)) if energy > 0 else -120.0
+
+
+def is_silent_block(samples: np.ndarray) -> bool:
+    """True when a block is too quiet to contain speech."""
+    return block_level_db(samples) < SILENT_BLOCK_DB
+
 
 class LocalDiarizationError(RuntimeError):
     """Raised when the local diarization stack cannot be used."""
 
 
+# Kept as a module constant so callers can name the model without building the
+# diarizer (the desktop app runs diarization in a child process and only needs
+# the label for the transcript).
+LOCAL_DIARIZATION_MODEL_ID = "sherpa-onnx: pyannote-segmentation-3.0 + TitaNet-small"
+
+
 class LocalDiarizer:
     """Diarizer that works offline, without any model hub access."""
 
-    model_id = "sherpa-onnx: pyannote-segmentation-3.0 + TitaNet-small"
+    model_id = LOCAL_DIARIZATION_MODEL_ID
 
     def __init__(
         self,
@@ -251,6 +276,15 @@ class LocalDiarizer:
             if last <= first:
                 break
             piece = samples[first:last]
+            if is_silent_block(piece):
+                # Nothing but the noise floor: no turns, and no embeddings to
+                # compute. The seam trimming below is a no-op then. Still tick
+                # the progress bar over the skipped block: otherwise the bar
+                # freezes and then jumps when a silent stretch is followed by a
+                # busy one (a dictaphone recording is mostly silence).
+                if progress is not None:
+                    progress((index + 1) / float(block_count))
+                continue
             base = index / float(block_count)
             span = 1.0 / float(block_count)
             turns = self._diarize_call(
@@ -278,6 +312,10 @@ class LocalDiarizer:
                 collected.append(turn)
 
         collected.sort(key=lambda turn: (turn.start, turn.end))
+        if progress is not None:
+            # The last block may have been skipped as silence, so the loop above
+            # never reached fraction 1.0 by itself.
+            progress(1.0)
         return collected
 
     def _match_labels(

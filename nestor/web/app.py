@@ -63,6 +63,7 @@ from ..glossary import (
 from ..library import Library, Recording, Segment
 from ..pipeline import JobCancelled, process_file
 from ..settings import SettingsStore
+from ..types import Turn
 from ..voiceprints import VoiceprintLibrary
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -496,6 +497,10 @@ class Processor:
 
         recording.status = "running"
         recording.stage = "starting"
+        # A fresh attempt starts from zero: without this the bar would briefly
+        # show the previous run's fraction (a repeat pass of a finished record
+        # showed "100%" while the new run was still queued).
+        recording.progress = 0.0
         try:
             self.library.save(recording)
             self.library.log(f"start {recording.filename} (model {config.model_name})")
@@ -609,6 +614,26 @@ class Processor:
             # place. Keeping a second full-length copy around is exactly what
             # made multi-hour recordings run out of memory.
             peaks = compute_peaks(waveform)
+
+            # Diarization is the other long CPU stage; run it in a child process
+            # so the window keeps answering while sherpa-onnx holds the GIL.
+            # Falls back to the in-process pass (turns=None) if it is disabled
+            # or unavailable.
+            precomputed_turns = None
+            if config.diarize:
+                def on_diarize(fraction: float) -> None:
+                    on_stage(
+                        "diarization", 0.07 + 0.18 * max(0.0, min(1.0, fraction))
+                    )
+
+                precomputed_turns = diarize_via_child(
+                    self.library,
+                    recording,
+                    config,
+                    on_progress=on_diarize,
+                    cancel=event.is_set,
+                )
+
             transcript = process_file(
                 config,
                 self.library.recording_source(recording),
@@ -616,6 +641,7 @@ class Processor:
                 waveform=waveform,
                 cancel=event.is_set,
                 reuse_waveform=True,
+                turns=precomputed_turns,
             )
             # ownership was handed to the pipeline: release our reference now so
             # the buffer can be freed while the transcript is being written
@@ -688,7 +714,9 @@ class Processor:
             recording.status = "error"
             recording.stage = "error"
             recording.error = str(exc)
-            recording.progress = 0.0   # a failed run must not keep a frozen percentage
+            # Keep the last fraction instead of zeroing it: "ошибка · 78%"
+            # tells the user how far the run got before it died, which is what
+            # matters when a job fails hours in.
             self.library.save(recording)
             write_timings("error", "error")
             self.library.log(f"error {recording.filename}: {exc}")
@@ -708,6 +736,8 @@ class Processor:
         """
         recording.status = "running"
         recording.stage = "starting"
+        # a fresh attempt starts from zero (see _run_job)
+        recording.progress = 0.0
         # snapshot for the diff shown after the run («12 → 9 · перенесено 143 реплики»)
         before_counts = Counter(s.speaker for s in recording.segments if s.speaker)
         self._moved_segments = 0
@@ -727,9 +757,12 @@ class Processor:
             # sherpa-onnx reports the fraction of processed chunks (0..1).
             # The truthy return value aborts the diarization run (see
             # LocalDiarizer.diarize) when the job was asked to stop.
+            # Here diarization *is* the job, so it owns the bar from the end of
+            # the decode band to the end of the run (0.06..0.95); the full pass
+            # reserves 0.06..0.25 for the same stage because ASR follows it.
             nonlocal last_save
             recording.stage = "diarization"
-            recording.progress = 0.05 + max(0.0, min(1.0, fraction)) * 0.90
+            recording.progress = 0.06 + max(0.0, min(1.0, fraction)) * 0.89
             now = time.monotonic()
             if now - last_save >= 0.4:
                 with contextlib.suppress(OSError):
@@ -746,7 +779,7 @@ class Processor:
             def on_decode(fraction: float) -> None:
                 nonlocal last_save
                 recording.stage = "decode"
-                recording.progress = 0.02 + 0.03 * max(0.0, min(1.0, fraction))
+                recording.progress = 0.02 + 0.04 * max(0.0, min(1.0, fraction))
                 now = time.monotonic()
                 if now - last_save >= 0.4:
                     with contextlib.suppress(OSError):
@@ -756,21 +789,57 @@ class Processor:
             waveform, from_cache = load_or_decode(self.library, recording, on_decode)
             if from_cache:
                 on_decode(1.0)  # cache hit: decode band done instantly
-            from ..pipeline import _accepts_progress, _diarizer_for
 
-            diarizer, diarizer_lock, _loaded = _diarizer_for(config, lambda _m: None)
-            turns = []
             recording.stage = "diarization"
             self.library.save(recording)
-            with diarizer_lock:
-                if event.is_set():
-                    raise JobCancelled("stopped before diarization")
-                if _accepts_progress(diarizer):
-                    turns = diarizer.diarize(
-                        waveform, SAMPLE_RATE, progress=on_progress
-                    )
-                else:
-                    turns = diarizer.diarize(waveform, SAMPLE_RATE)
+
+            # Diarization is the long CPU stage; run it in a child process so
+            # the window keeps answering while sherpa-onnx holds the GIL. This
+            # mode always diarized the raw signal (no speech enhancement), so
+            # ask the child for the same: enhance=False.
+            turns = diarize_via_child(
+                self.library,
+                recording,
+                config,
+                on_progress=on_progress,
+                cancel=event.is_set,
+                enhance=False,
+            )
+            if turns is None:
+                # Child unavailable or disabled: fall back to the in-process
+                # pass. The waveform is still needed below (voiceprints read
+                # it). Only this fallback builds the diarizer in this process.
+                from ..pipeline import (
+                    _accepts_blocking,
+                    _accepts_progress,
+                    _diarizer_for,
+                )
+
+                diarizer, diarizer_lock, _loaded = _diarizer_for(
+                    config, lambda _m: None
+                )
+                turns = []
+                with diarizer_lock:
+                    if event.is_set():
+                        raise JobCancelled("stopped before diarization")
+                    if _accepts_blocking(diarizer):
+                        # Same block-wise path the full run uses: without it a
+                        # multi-hour record is diarized in one call, which both
+                        # blows up memory (``bad allocation``) and feeds hours
+                        # of silence to the segmenter.
+                        turns = diarizer.diarize(
+                            waveform,
+                            SAMPLE_RATE,
+                            progress=on_progress,
+                            block_seconds=float(getattr(config, "diar_block_seconds", 0.0) or 0.0),
+                            block_overlap=float(getattr(config, "diar_block_overlap", 60.0) or 0.0),
+                        )
+                    elif _accepts_progress(diarizer):
+                        turns = diarizer.diarize(
+                            waveform, SAMPLE_RATE, progress=on_progress
+                        )
+                    else:
+                        turns = diarizer.diarize(waveform, SAMPLE_RATE)
             if event.is_set():
                 # the diarizer aborted mid-run (empty/partial turns) — discard
                 raise JobCancelled("stopped while diarizing")
@@ -979,7 +1048,8 @@ class Processor:
             recording.status = "error"
             recording.stage = "error"
             recording.error = str(exc)
-            recording.progress = 0.0   # a failed run must not keep a frozen percentage
+            # keep the last fraction (see _run_job): "ошибка · N%" is more
+            # useful than a blank bar
             self.library.save(recording)
             self.library.log(f"error {recording.filename} (speakers-only): {exc}")
 
@@ -1295,6 +1365,158 @@ def _decode_via_child(
     if on_progress is not None:
         on_progress(1.0)
     return True
+
+
+# Diarization runs in a child process for the same reason decoding does: while
+# sherpa-onnx works it holds the GIL for long stretches (measured: single waits
+# of up to 106 s), and the HTTP server the window talks to lives in this very
+# process. Progress callbacks do not help - they run on the thread that holds
+# the lock. Set NESTOR_DIARIZE_SUBPROCESS=0 to force the old in-process path.
+DIARIZE_SUBPROCESS_ENV = "NESTOR_DIARIZE_SUBPROCESS"
+
+
+def _diarize_in_subprocess_enabled() -> bool:
+    value = os.environ.get(DIARIZE_SUBPROCESS_ENV, "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _read_turns(path: Path) -> Optional[List]:
+    """Speaker turns written by the diarization child, or None if unusable."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, list):
+        return None
+    turns = []
+    for item in payload:
+        try:
+            turns.append(
+                Turn(
+                    start=float(item["start"]),
+                    end=float(item["end"]),
+                    speaker=str(item["speaker"]),
+                )
+            )
+        except (TypeError, KeyError, ValueError):
+            continue
+    return turns
+
+
+def diarize_via_child(
+    library: Library,
+    recording: Recording,
+    config: Config,
+    on_progress=None,
+    cancel=None,
+    enhance: Optional[bool] = None,
+) -> Optional[List]:
+    """Run diarization in a separate process; return turns or None.
+
+    The child reads the cached 16 kHz wav and re-applies the same speech
+    enhancement the pipeline would, so the parent does not have to hand over a
+    multi-hundred-megabyte buffer across the process border - only the small
+    list of speaker turns comes back.
+
+    ``enhance`` overrides whether the child lifts the speech level first. The
+    full pass enhances the audio before diarizing, the speakers-only pass
+    always diarized the raw signal - so that mode asks for ``enhance=False``.
+    ``None`` means "do what the pipeline config says".
+
+    Every failure returns None so the caller falls back to the in-process path:
+    a frozen window is annoying, a lost job is not acceptable. A cancellation
+    request terminates the child and re-raises :class:`JobCancelled`.
+    """
+    if not _diarize_in_subprocess_enabled():
+        return None
+    try:
+        from ..models import has_local_diarization
+
+        if not has_local_diarization():
+            return None
+    except Exception:  # noqa: BLE001 - probe only, never fail the job
+        return None
+
+    cache = waveform_cache_path(library, recording.id)
+    if not cache.exists():
+        return None
+
+    import multiprocessing
+
+    from ..diarize_worker import diarize_cache_to_turns
+    from ..cpuinfo import resolve_diar_threads
+
+    turns_path = cache.with_name("diarize.turns.json")
+    progress = cache.with_name("diarize.turns.json.progress")
+    _unlink(turns_path)
+    _unlink(progress)
+    try:
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(
+            target=diarize_cache_to_turns,
+            args=(str(cache), str(turns_path), str(progress)),
+            kwargs={
+                "enhance": (
+                    bool(config.audio_enhance) if enhance is None else bool(enhance)
+                ),
+                "num_speakers": int(config.num_speakers or 0),
+                "num_threads": int(resolve_diar_threads(config.threads)),
+                "threshold": float(getattr(config, "diar_threshold", 0.5)),
+                "min_duration_on": float(getattr(config, "diar_min_duration_on", 0.5)),
+                "min_duration_off": float(getattr(config, "diar_min_duration_off", 0.0)),
+                "block_seconds": float(getattr(config, "diar_block_seconds", 0.0) or 0.0),
+                "block_overlap": float(getattr(config, "diar_block_overlap", 60.0) or 0.0),
+            },
+            name="nestor-diarize",
+            daemon=True,
+        )
+        proc.start()
+    except Exception:  # noqa: BLE001 - frozen/spawn may be unavailable
+        _unlink(progress)
+        return None
+
+    reported = -1
+    cancelled = False
+    try:
+        while proc.is_alive():
+            proc.join(0.25)
+            if cancel is not None and cancel():
+                cancelled = True
+                break
+            if on_progress is None:
+                continue
+            done = _read_progress(progress)
+            if done is not None:
+                percent = int(done * 100)
+                if percent > reported:
+                    reported = percent
+                    on_progress(min(0.999, done))
+    except BaseException:
+        proc.terminate()
+        proc.join(5)
+        _unlink(progress)
+        _unlink(turns_path)
+        raise
+
+    if cancelled:
+        proc.terminate()
+        proc.join(5)
+        _unlink(progress)
+        _unlink(turns_path)
+        raise JobCancelled("stopped while diarizing")
+
+    code = proc.exitcode
+    _unlink(progress)
+    if code != 0:
+        _unlink(turns_path)
+        return None
+    turns = _read_turns(turns_path)
+    _unlink(turns_path)
+    if turns is None:
+        return None
+    if on_progress is not None:
+        on_progress(1.0)
+    return turns
 
 
 def load_or_decode(

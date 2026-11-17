@@ -587,6 +587,10 @@ def test_speakers_mode_reassigns_and_keeps_text(app, monkeypatch):
     # the diarizer cache resolves through nestor.pipeline - seed it directly
     import nestor.pipeline as pipeline_module
 
+    # Keep diarization in this process so the seeded fake diarizer below is used
+    # (the child process would build a real model instead).
+    monkeypatch.setenv(app_module.DIARIZE_SUBPROCESS_ENV, "0")
+
     key = (True, "auto", None, cpuinfo.resolve_threads(0))
     monkeypatch.setitem(
         pipeline_module._DIARIZER_CACHE, key, (FakeDiarizer(), threading.Lock())
@@ -639,6 +643,10 @@ def test_speakers_mode_drops_names_when_split_changes(app, monkeypatch):
 
     import nestor.pipeline as pipeline_module
 
+    # Keep diarization in this process: the fake diarizer below is seeded in the
+    # pipeline cache, so the child process must not take over.
+    monkeypatch.setenv(app_module.DIARIZE_SUBPROCESS_ENV, "0")
+
     key = (True, "auto", None, cpuinfo.resolve_threads(0))
     monkeypatch.setitem(
         pipeline_module._DIARIZER_CACHE, key, (OneSpeakerDiarizer(), threading.Lock())
@@ -689,6 +697,10 @@ def test_speakers_job_stops_mid_diarization(app, monkeypatch):
     library.save(recording)
     (library.uploads_dir / "rec1").mkdir(parents=True, exist_ok=True)
     (library.uploads_dir / "rec1" / "a.wav").write_bytes(b"fake audio")
+
+    # Keep diarization in this process: the cancellable fake below tests the
+    # in-process progress callback, not the child process.
+    monkeypatch.setenv(app_module.DIARIZE_SUBPROCESS_ENV, "0")
 
     key = (True, "auto", None, cpuinfo.resolve_threads(0))
     monkeypatch.setitem(
@@ -913,9 +925,9 @@ def test_json_export_matches_other_formats_and_is_structured(tmp_path):
     assert "progress" not in payload
 
 
-def test_failed_job_resets_progress(tmp_path, monkeypatch):
-    """QA М11: a crashed run kept its last percentage, so the UI showed a
-    frozen progress bar next to an error."""
+def test_failed_job_keeps_last_progress(tmp_path, monkeypatch):
+    """A crashed run keeps the last fraction: "ошибка · 40%" tells the user how
+    far the job got, which is what matters when a long run dies hours in."""
     monkeypatch.setattr(
         app_module,
         "decode",
@@ -938,4 +950,4 @@ def test_failed_job_resets_progress(tmp_path, monkeypatch):
 
     process(record_id="rec1", body=ProcessBody(mode="full"))
     assert _wait_for(lambda: library.load("rec1").status == "error")
-    assert library.load("rec1").progress == 0.0
+    assert library.load("rec1").progress == pytest.approx(0.4, abs=0.01)

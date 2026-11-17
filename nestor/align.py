@@ -171,15 +171,26 @@ def merge_words(
     words: Sequence[Word],
     max_gap: float = 0.8,
     min_duration: float = 0.0,
+    max_segment: float = 60.0,
 ) -> List[Segment]:
-    """Merge consecutive words of the same speaker into segments."""
+    """Merge consecutive words of the same speaker into segments.
+
+    ``max_segment`` (seconds, ``0`` disables it) starts a new segment when the
+    current one would grow past it. Without the cap an uninterrupted monologue
+    becomes a single multi-minute paragraph: unreadable in the transcript, and
+    a region the voiceprint model cannot embed (it rejects over 122,88 s).
+    """
     segments: List[Segment] = []
 
     for word in words:
         speaker = word.speaker or DEFAULT_SPEAKER
         if segments:
             last = segments[-1]
-            if last.speaker == speaker and word.start - last.end <= max_gap:
+            if (
+                last.speaker == speaker
+                and word.start - last.end <= max_gap
+                and (max_segment <= 0 or word.end - last.start <= max_segment)
+            ):
                 last.words.append(word)
                 last.end = word.end
                 last.text = " ".join(w.text for w in last.words)

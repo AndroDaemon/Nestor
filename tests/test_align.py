@@ -79,6 +79,22 @@ def test_merge_words_groups_by_speaker():
     assert segments[1].speaker == "B"
 
 
+def test_merge_words_starts_a_new_segment_when_one_grows_too_long():
+    # монолог на пять минут: без предела это один сегмент, который не
+    # прочитаешь и не отдашь в модель отпечатков (её предел — 122,88 с)
+    words = [Word(f"слово{i}", i * 1.0, i * 1.0 + 0.9, "A") for i in range(300)]
+    segments = merge_words(words, max_gap=1.0)
+    assert len(segments) > 1
+    assert all(seg.end - seg.start <= 60.0 for seg in segments)
+    assert "".join(w.text for seg in segments for w in seg.words) == "".join(w.text for w in words)
+
+
+def test_merge_words_segment_limit_can_be_disabled():
+    words = [Word(f"слово{i}", i * 1.0, i * 1.0 + 0.9, "A") for i in range(300)]
+    segments = merge_words(words, max_gap=1.0, max_segment=0)
+    assert len(segments) == 1
+
+
 def test_relabel_speakers():
     segments = [
         Segment(0.0, 1.0, "SPEAKER_00", "a"),

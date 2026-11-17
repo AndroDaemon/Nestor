@@ -8,6 +8,10 @@ This module wraps ``sherpa_onnx.SpeakerEmbeddingExtractor`` and provides:
 * per-segment embeddings for the transcript segments,
 * per-recording caches stored as ``embeddings/<record_id>.npz``.
 
+Long regions are cut into windows (see :data:`MAX_EMBED_SECONDS`): the model
+rejects anything over 12288 frames, and on long recordings a single speaker
+turn can be minutes long.
+
 All CPU, no network: the model is the same ``nemo_en_titanet_small.onnx`` that
 the diarization stack already ships.
 """
@@ -30,6 +34,19 @@ from .types import Segment
 _EMBEDDING_CACHE_LOCK = threading.Lock()
 _EXTRACTOR = None
 _EXTRACTOR_THREADS: Optional[int] = None
+
+# TitaNet-small has a hard input ceiling: its encoder masks the activations
+# with a fixed 12288-frame table, and anything longer kills the ONNX Runtime
+# session with
+#   Where node ... Attempting to broadcast an axis by a dimension other than 1.
+#   12288 by <frames>
+# A speaker turn on a long recording is easily minutes long (a quiet stretch
+# gets read as one turn), so every region is cut into windows of this length
+# and the window vectors are averaged.
+MAX_EMBED_SECONDS = 20.0
+# A tail shorter than this carries more noise than voice; drop it when the
+# region already produced at least one full window.
+_MIN_WINDOW_SECONDS = 0.5
 
 
 def l2_normalise(vector: np.ndarray) -> np.ndarray:
@@ -97,6 +114,32 @@ def _embed_samples(extractor, samples: np.ndarray, sample_rate: int) -> np.ndarr
     return np.asarray(extractor.compute(stream), dtype=np.float32)
 
 
+def _embed_region(extractor, samples: np.ndarray, sample_rate: int) -> np.ndarray:
+    """L2-normalised embedding of a region of *any* length.
+
+    Regions up to :data:`MAX_EMBED_SECONDS` go in as a single window — the
+    model's own pooling is better than anything done here. Longer ones (a
+    multi-minute speaker turn, a whole file) are cut into consecutive windows,
+    embedded one by one and averaged, because one pass over them would exceed
+    the model's 12288-frame limit and raise
+    ``Where node ... 12288 by N``.
+    """
+    window = max(1, int(MAX_EMBED_SECONDS * sample_rate))
+    if samples.shape[0] <= window:
+        return l2_normalise(_embed_samples(extractor, samples, sample_rate))
+
+    shortest = max(1, int(_MIN_WINDOW_SECONDS * sample_rate))
+    vectors: List[np.ndarray] = []
+    for first in range(0, samples.shape[0], window):
+        piece = samples[first:first + window]
+        if piece.shape[0] < shortest and vectors:
+            continue
+        vectors.append(_embed_samples(extractor, piece, sample_rate))
+    if not vectors:  # region shorter than the tail limit — take it whole
+        return l2_normalise(_embed_samples(extractor, samples, sample_rate))
+    return l2_normalise(np.mean(np.vstack(vectors), axis=0))
+
+
 def embed_audio(
     waveform: np.ndarray,
     sample_rate: int,
@@ -113,7 +156,7 @@ def embed_audio(
     first = int(start * sample_rate)
     last = int(stop * sample_rate)
     extractor = _get_extractor()
-    return l2_normalise(_embed_samples(extractor, samples[first:last], sample_rate))
+    return _embed_region(extractor, samples[first:last], sample_rate)
 
 
 def embed_segments(
@@ -126,6 +169,8 @@ def embed_segments(
 
     Segments shorter than ``min_duration`` seconds carry too little speech to
     give a stable portrait, so they are skipped (noise dominates the vector).
+    Longer than :data:`MAX_EMBED_SECONDS` is fine: such a region is embedded
+    window by window and averaged.
     """
     samples = np.ascontiguousarray(waveform, dtype=np.float32)
     total = samples.shape[0] / float(sample_rate)
@@ -143,7 +188,7 @@ def embed_segments(
             result.append(None)
             continue
         result.append(
-            l2_normalise(_embed_samples(extractor, samples[first:last], sample_rate))
+            _embed_region(extractor, samples[first:last], sample_rate)
         )
     return result
 

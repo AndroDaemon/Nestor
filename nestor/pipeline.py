@@ -18,7 +18,7 @@ from .constants import SAMPLE_RATE
 from .cpuinfo import resolve_diar_threads, resolve_threads
 from .diarize import SingleSpeakerDiarizer, _accepts_blocking, _accepts_progress, build_diarizer
 from .models import ensure_gigaam_punct
-from .types import Segment, Transcript, Word
+from .types import Segment, Transcript, Turn, Word
 
 ProgressFn = Callable[[str], None]
 StageFn = Callable[[str, float], None]
@@ -239,6 +239,7 @@ def process_file(
     waveform: Optional["np.ndarray"] = None,
     cancel: Optional[CancelFn] = None,
     reuse_waveform: bool = False,
+    turns: Optional[List[Turn]] = None,
 ) -> Transcript:
     """Transcribe and diarize a single audio file.
 
@@ -308,22 +309,38 @@ def process_file(
     if cancelled():
         raise JobCancelled("stopped while decoding")
 
-    turns = []
+    # ``turns=None`` means "the caller did not diarize"; an empty list means
+    # "the caller did and got nothing" - keep the difference, or a silent
+    # recording would build the heavy model here and freeze the window again.
+    precomputed = turns is not None
+    turns = list(turns) if precomputed else []
     diarization_model = None
-    if config.diarize:
+    if config.diarize and precomputed:
+        # Caller already ran diarization (in a child process, to keep the window
+        # responsive) and handed the turns over. Skip the local pass entirely -
+        # and do not build the diarizer here, the whole point is to keep the
+        # heavy model out of this process.
+        from .diarize_local import LOCAL_DIARIZATION_MODEL_ID
+
+        stage("diarization", 0.07)
+        diarization_model = LOCAL_DIARIZATION_MODEL_ID
+        report(f"  {len(turns)} speaker turns (precomputed)")
+    elif config.diarize:
         stage("diarization", 0.06)
         diarizer, diarizer_lock, _loaded = _diarizer_for(
             config, report, on_load=lambda: stage("loading", 0.06)
         )
         diarization_model = diarizer.model_id
         report("  running diarization ...")
-        stage("diarization", 0.12)
+        stage("diarization", 0.07)
 
         def diarization_progress(fraction: float):
-            # sherpa-onnx reports chunk progress; map it into the 0.12..0.19
-            # band so the indicator keeps moving during long files. Returning
-            # a truthy value aborts the diarization run itself.
-            stage("diarization", 0.12 + 0.07 * max(0.0, min(1.0, fraction)))
+            # sherpa-onnx reports chunk progress; map it into the 0.07..0.25
+            # band so the indicator keeps moving during long files. Diarization
+            # is roughly a fifth of a full run, so it owns that much of the bar
+            # instead of the sliver it used to (0.12..0.19). Returning a truthy
+            # value aborts the diarization run itself.
+            stage("diarization", 0.07 + 0.18 * max(0.0, min(1.0, fraction)))
             return cancelled()
 
         with diarizer_lock:
@@ -363,9 +380,9 @@ def process_file(
     stopped = False
     last_index = 0
     if chunks:
-        stage("transcription", 0.2)
+        stage("transcription", 0.25)
         asr, asr_lock, _loaded = _asr_for(
-            config, report, on_load=lambda: stage("loading", 0.2)
+            config, report, on_load=lambda: stage("loading", 0.25)
         )
         with asr_lock:
             for index, (start, end) in enumerate(chunks, start=1):
@@ -380,7 +397,7 @@ def process_file(
                 )
                 words.extend(chunk_words)
                 last_index = index
-                stage("transcription", 0.2 + 0.75 * index / len(chunks))
+                stage("transcription", 0.25 + 0.65 * index / len(chunks))
                 report(
                     f"  chunk {index}/{len(chunks)} "
                     f"[{start:.1f}-{end:.1f}s]: {len(chunk_words)} words"

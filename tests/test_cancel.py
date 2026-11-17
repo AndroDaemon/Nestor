@@ -145,6 +145,10 @@ def _endpoint(app, method: str, path: str):
 def test_cancel_endpoint_stops_running_and_queued_jobs(tmp_path, monkeypatch):
     import nestor.web.app as app_module
 
+    # Keep diarization in this process: the test stands in for the pipeline and
+    # only cares about the stop checkpoints, not about the child process.
+    monkeypatch.setenv(app_module.DIARIZE_SUBPROCESS_ENV, "0")
+
     calls = []
     monkeypatch.setattr(
         app_module,
