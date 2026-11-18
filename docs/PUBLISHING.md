@@ -7,10 +7,11 @@
 
 **Лицензии и правовая часть**
 
-- `LICENSE` — MIT для кода + список сторонних компонентов и моделей с их
-  лицензиями: GigaAM v3 (MIT), sherpa-onnx (Apache-2.0),
-  pyannote/segmentation-3.0 (MIT), NVIDIA TitaNet (CC-BY-4.0), FFmpeg
-  (LGPL/GPL, внешний процесс), библиотеки интерфейса.
+- `LICENSE` — чистый текст MIT для кода (так GitHub распознаёт лицензию).
+- `THIRD-PARTY.md` — список сторонних компонентов и моделей с их лицензиями:
+  GigaAM v3 (MIT), sherpa-onnx (Apache-2.0), pyannote/segmentation-3.0 (MIT),
+  NVIDIA TitaNet (CC-BY-4.0), FFmpeg (LGPL/GPL, внешний процесс), библиотеки
+  интерфейса.
 - Раздел «Лицензии» в `README.md` — та же таблица с атрибуцией.
 - Экран «Помощь» в приложении уже упоминает технологии и лицензии.
 
