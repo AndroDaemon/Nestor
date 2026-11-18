@@ -22,6 +22,33 @@ from .web.app import generate_session_token
 
 WINDOW_TITLE = "Nestor"
 
+# Named mutex held for the lifetime of the process. The installer and the
+# uninstaller watch this name (AppMutex in packaging/Nestor.iss): it is how they
+# know the application is running and files must not be replaced mid-upgrade.
+# The single-instance logic itself uses instance.json — see run().
+MUTEX_NAME = "Nestor.Desktop.SingleInstance"
+_mutex_handle = None
+
+
+def acquire_mutex(name: str = MUTEX_NAME) -> bool:
+    """Create the named mutex the installer waits on (Windows only, best effort).
+
+    Returns True when the mutex is held. On a non-Windows host, or if the call
+    fails, returns False and the caller carries on: the mutex must never stop
+    the application from starting."""
+    global _mutex_handle
+    if os.name != "nt":
+        return False
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            return False
+        _mutex_handle = handle  # held for the process lifetime
+        return True
+    except Exception:  # noqa: BLE001 - best effort
+        return False
+
 
 def free_port() -> int:
     """Pick a free TCP port on the loopback interface."""
@@ -87,6 +114,9 @@ def run(
         if focus_existing(title):
             print("Nestor is already running — the existing window was focused.")
             return 0
+
+    # Let the installer/uninstaller see that the application is up.
+    acquire_mutex()
 
     port = free_port()
     token = generate_session_token()

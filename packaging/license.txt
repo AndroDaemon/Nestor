@@ -1,0 +1,45 @@
+MIT License
+
+Copyright (c) 2026 Nestor contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party components used by this application:
+
+This project redistributes or depends on components and model weights under
+their own licenses. Attribution and terms:
+
+* GigaAM v3 (speech recognition) — Salute Devices, MIT License
+  <https://github.com/salute-developers/GigaAM>
+* sherpa-onnx (ASR / diarization runtime) — Apache License 2.0
+  <https://github.com/k2-fsa/sherpa-onnx>
+* pyannote/segmentation-3.0 (speaker segmentation) — MIT License
+  © pyannote, <https://huggingface.co/pyannote/segmentation-3.0>
+* NVIDIA TitaNet (speaker embeddings, small) — CC-BY-4.0
+  <https://huggingface.co/nvidia/speakerverification_en_titanet_large>
+* FastAPI, Starlette, Uvicorn, Pydantic — MIT / BSD
+* pywebview — BSD-3-Clause; Microsoft Edge WebView2 — Microsoft terms
+* PyTorch, Torchaudio — BSD-3-Clause
+* FFmpeg — LGPL/GPL (invoked as an external process, not linked)
+* NumPy, SciPy, python-docx, SentencePiece, PyYAML, ONNX Runtime — permissive licenses
+
+The model weights are not part of the source repository; they are downloaded on
+first use or bundled into the installer together with the notices above.

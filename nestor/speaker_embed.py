@@ -177,9 +177,17 @@ def embed_segments(
     extractor = _get_extractor()
     result: List[Optional[np.ndarray]] = []
     for start, end in segments:
-        start = max(0.0, float(start))
-        end = min(float(end), total)
+        start = float(start)
+        end = float(end)
+        # Judge the length before clamping to the file: a segment that only
+        # looks short because the recording ends mid-word still belongs to the
+        # cluster, and callers rely on one embedding per segment for alignment.
         if end - start < float(min_duration):
+            result.append(None)
+            continue
+        start = max(0.0, start)
+        end = min(end, total)
+        if end <= start:
             result.append(None)
             continue
         first = int(start * sample_rate)
@@ -191,6 +199,62 @@ def embed_segments(
             _embed_region(extractor, samples[first:last], sample_rate)
         )
     return result
+
+
+OUTLIER_COS = 0.30
+"""Agreement below this means the segment is not this voice at all."""
+
+OUTLIER_RATIO = 0.5
+"""...and it must also be far worse than the next segment to be dropped.
+
+One interjection without voice ("э-э, ну вот") has an agreement of 0.08 in a
+cluster whose real segments sit at 0.23 and 0.33, so it stands clearly apart.
+Two real short segments, on the other hand, may agree with each other only
+weakly (0.48 pairwise) - dropping either of them would destroy a tiny cluster's
+centroid, which is exactly the case this guard exists for.
+"""
+
+
+def _weighted_mean(pairs: Sequence[Tuple[np.ndarray, float]]) -> np.ndarray:
+    total = np.zeros_like(pairs[0][0])
+    weight = 0.0
+    for vector, duration in pairs:
+        total = total + vector * duration
+        weight += duration
+    return total / weight if weight > 0 else total
+
+
+def _drop_outliers(
+    pairs: Sequence[Tuple[np.ndarray, float]],
+    floor: float = OUTLIER_COS,
+    ratio: float = OUTLIER_RATIO,
+) -> List[Tuple[np.ndarray, float]]:
+    """Remove the one segment that clearly does not belong to the cluster.
+
+    Agreement is pairwise - the mean cosine to the other segments of the same
+    label. The cosine to the cluster's own centroid is not usable here: on a
+    small cluster the outlier drags the centroid towards itself and then looks
+    almost respectable there (0.56 in the case that started this).
+    """
+    count = len(pairs)
+    if count < 3:
+        # Two vectors always agree or disagree equally with each other, so
+        # there is no majority to trust: leave the cluster alone.
+        return list(pairs)
+    matrix = np.asarray(
+        [np.asarray(vector, dtype=np.float64) for vector, _ in pairs]
+    )
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms <= 0.0] = 1.0
+    matrix = matrix / norms
+    sims = matrix @ matrix.T
+    agreement = (sims.sum(axis=1) - 1.0) / (count - 1)
+    order = np.argsort(agreement)
+    worst = int(order[0])
+    runner_up = float(agreement[order[1]])
+    if agreement[worst] >= floor or agreement[worst] >= runner_up * ratio:
+        return list(pairs)
+    return [pair for index, pair in enumerate(pairs) if index != worst]
 
 
 def cluster_vectors(
@@ -205,27 +269,27 @@ def cluster_vectors(
     (``SPEAKER_00``) to the weighted average of its segment embeddings, and
     ``per_segment`` maps the label to the list of its segment embeddings
     (short segments excluded). Both are L2-normalised.
+
+    The centroid is robust against segments with no voice in them: segments far
+    below :data:`OUTLIER_COS` from the rest of their cluster are left out of the
+    mean. ``per_segment`` still lists every segment, in segment order, because
+    later steps match those rows to segments by position.
     """
     regions = [(segment.start, segment.end) for segment in segments]
     vectors = embed_segments(
         waveform, sample_rate, regions, min_duration=min_segment_sec
     )
-    sums: Dict[str, np.ndarray] = {}
-    weights: Dict[str, float] = {}
-    per_segment: Dict[str, List[np.ndarray]] = {}
+    pairs: Dict[str, List[Tuple[np.ndarray, float]]] = {}
     for segment, vector in zip(segments, vectors):
         if vector is None:
             continue
         duration = max(0.0, float(segment.end) - float(segment.start))
-        label = segment.speaker
-        sums[label] = sums.get(label, np.zeros_like(vector)) + vector * duration
-        weights[label] = weights.get(label, 0.0) + duration
-        per_segment.setdefault(label, []).append(vector)
+        pairs.setdefault(segment.speaker, []).append((vector, duration))
     clusters: Dict[str, np.ndarray] = {}
-    for label, total in sums.items():
-        weight = weights.get(label, 0.0)
-        mean = total / weight if weight > 0 else total
-        clusters[label] = l2_normalise(mean)
+    per_segment: Dict[str, List[np.ndarray]] = {}
+    for label, rows in pairs.items():
+        clusters[label] = l2_normalise(_weighted_mean(_drop_outliers(rows)))
+        per_segment[label] = [vector for vector, _ in rows]
     return clusters, per_segment
 
 

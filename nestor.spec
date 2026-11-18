@@ -170,6 +170,75 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+
+def _version_tuple(text: str) -> tuple:
+    """'1.5.4' -> (1, 5, 4, 0); extra parts are ignored, missing ones filled."""
+    parts = []
+    for chunk in str(text).split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 4:
+        parts.append(0)
+    return tuple(parts[:4])
+
+
+def _read_version() -> str:
+    """Version from pyproject.toml — the single source, same as the installer."""
+    try:
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return "0.0.0"
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    return "0.0.0"
+
+
+def _version_info() -> "VSVersionInfo":
+    """Windows file properties (Details tab) for Nestor.exe."""
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    app_version = _read_version()
+    numbers = _version_tuple(app_version)
+    strings = (
+        ("CompanyName", "Nestor"),
+        ("FileDescription", "Nestor — офлайн-расшифровка с разделением по спикерам"),
+        ("FileVersion", app_version),
+        ("InternalName", "Nestor"),
+        ("LegalCopyright", "Copyright (C) 2026 Nestor contributors"),
+        ("OriginalFilename", "Nestor.exe"),
+        ("ProductName", "Nestor"),
+        ("ProductVersion", app_version),
+    )
+    return VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=numbers,
+            prodvers=numbers,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo(
+                [StringTable("040904B0", [StringStruct(k, v) for k, v in strings])]
+            ),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
+
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -187,6 +256,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ROOT / "packaging" / "nestor.ico") if (ROOT / "packaging" / "nestor.ico").exists() else None,
+    version=_version_info(),
 )
 
 coll = COLLECT(

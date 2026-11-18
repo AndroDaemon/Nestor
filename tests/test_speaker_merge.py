@@ -329,6 +329,23 @@ def test_split_inhomogeneous_cluster_cuts_two_voices_apart():
     assert any("into 2" in line for line in lines)
 
 
+def test_split_skips_a_cluster_whose_rows_and_segments_disagree():
+    # cluster_vectors drops segments without voice from per_segment; the split
+    # maps rows to segments by position, so lengths must match exactly.
+    angles = [-1.0, 1.0, 0.0] * 20 + [70.0, 72.0, 68.0] * 20
+    segments, clusters, per_segment = _cluster_of("SPEAKER_00", angles)
+    per_segment["SPEAKER_00"] = per_segment["SPEAKER_00"][:-1]
+    lines = []
+
+    new_clusters, _ = split_inhomogeneous_clusters(
+        segments, clusters, per_segment, report=lines.append, min_segments=50
+    )
+
+    assert list(new_clusters) == ["SPEAKER_00"]
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00"}
+    assert any("embeddings for" in line for line in lines)
+
+
 def test_split_inhomogeneous_cluster_leaves_a_uniform_voice_alone():
     angles = [a * 1.0 for a in range(0, 60)]  # one long continuum, ~0.9 coherence
     segments, clusters, per_segment = _cluster_of("SPEAKER_00", angles)

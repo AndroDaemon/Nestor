@@ -148,8 +148,8 @@ def merge_similar_clusters(
         """Do both clusters' own segments support the merged voice?"""
         if segment_floor <= 0.0 or segments_of is None:
             return True
-        own = segments_of[small]
-        other = segments_of[big]
+        own = _drop_isolated(np.asarray(segments_of[small], dtype=np.float64))
+        other = _drop_isolated(np.asarray(segments_of[big], dtype=np.float64))
         if own.shape[0] == 0 or other.shape[0] == 0:
             return False
         forward = float(np.mean(own @ matrix[big]))
@@ -300,6 +300,37 @@ def merge_similar_clusters(
             mapping[label] = labels[root]
         members.append(group)
     return mapping, members
+
+
+SEGMENT_OUTLIER_COS = 0.30
+"""Agreement below this means a segment is not this speaker at all."""
+
+SEGMENT_OUTLIER_RATIO = 0.5
+"""...and it must be far worse than the next one to be left out."""
+
+
+def _drop_isolated(matrix: np.ndarray) -> np.ndarray:
+    """Rows that agree with none of their neighbours in the same cluster.
+
+    Agreement is the mean cosine to the other rows. Such a row is an
+    interjection with no voice in it, and the cosine to the other cluster's
+    centroid says nothing about the speaker - it only adds noise to the floor
+    test. Only the single clearly isolated row is dropped, and never from a
+    cluster of two, where there is no majority to trust.
+    """
+    count = int(matrix.shape[0])
+    if count < 3:
+        return matrix
+    sims = matrix @ matrix.T
+    agreement = (sims.sum(axis=1) - 1.0) / (count - 1)
+    order = np.argsort(agreement)
+    worst = int(order[0])
+    if agreement[worst] >= SEGMENT_OUTLIER_COS:
+        return matrix
+    if agreement[worst] >= float(agreement[order[1]]) * SEGMENT_OUTLIER_RATIO:
+        return matrix
+    keep = [index for index in range(count) if index != worst]
+    return matrix[keep]
 
 
 def apply_to_segments(
@@ -496,6 +527,17 @@ def split_inhomogeneous_clusters(
             continue
         dim = len(vector)
         matrix = _rows_matrix(rows, dim)
+        label_segments = carriers.get(label, [])
+        if len(label_segments) != matrix.shape[0]:
+            # Rows are matched to segments by position, so a mismatch (some
+            # segments were dropped as noise) would mislabel the halves.
+            new_clusters[label] = vector
+            new_per_segment[label] = rows
+            say(
+                f"  split skipped {label}: {matrix.shape[0]} embeddings for "
+                f"{len(label_segments)} segments"
+            )
+            continue
         labels, centroids = _kmeans_two(matrix, SPLIT_KMEANS_SEED, SPLIT_KMEANS_ITERS)
         halves = [matrix[labels == 0], matrix[labels == 1]]
         if not halves[0].shape[0] or not halves[1].shape[0]:
@@ -539,7 +581,6 @@ def split_inhomogeneous_clusters(
         )
         # heaviest half keeps the original label; the other gets a suffix
         order = [0, 1] if halves[0].shape[0] >= halves[1].shape[0] else [1, 0]
-        label_segments = carriers.get(label, [])
         for index, group in enumerate(order):
             suffix = "" if index == 0 else f"__SPLIT{index}"
             new_label = label + suffix

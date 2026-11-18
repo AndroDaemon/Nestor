@@ -1,7 +1,8 @@
 # Голоса (voiceprints) — локальная идентификация спикеров
 
 Статус: реализовано и проверено (229 passed, 1 skipped; живые проверки API+UI пройдены).
-Ветка: master. Версия 1.5.3 в `nestor/__init__.py` и `MyAppVersion` в `packaging/Nestor.iss`.
+Ветка: master. Версия в `pyproject.toml` — единственный источник; из неё же её
+берут `nestor/__init__.py`-метаданные exe и `MyAppVersion` в `packaging/Nestor.iss`.
 
 ## Что это
 После диаризации Nestor сравнивает голосовые отпечатки кластеров с локальной

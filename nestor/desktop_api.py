@@ -362,6 +362,25 @@ class DesktopApi:
         self._open(path)
         return str(path)
 
+    def open_guide(self) -> bool:
+        """Open the offline user guide shipped next to the program.
+
+        The installer puts the rendered guide in <install dir>\\docs\\index.html,
+        a sibling of the running executable in a frozen build. When the file is
+        unavailable (running from source), report failure so the interface can
+        fall back to its built-in help."""
+        if not getattr(sys, "frozen", False):
+            return False
+        base = Path(sys.executable).resolve().parent
+        for candidate in (
+            base / "docs" / "index.html",
+            base.parent / "docs" / "index.html",
+        ):
+            if candidate.exists():
+                self._open(candidate)
+                return True
+        return False
+
     def show_in_folder(self, path: str) -> str:
         """Reveal a file in Explorer."""
         target = Path(path)

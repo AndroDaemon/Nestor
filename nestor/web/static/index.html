@@ -2290,18 +2290,38 @@ function sortChips() {
 
 const BG_MAX_SEGMENTS = 3;  // ярлык с таким числом реплик считается осколком/фоном
 const BG_TOKEN = /^(шум|шум\w*|noise|фон|background)$/i;
+// Служебная приставка «Фон: » — так помечают названного спикера, которого
+// вручную отправили в группу.
+const BG_PREFIX = /^фон\s*:/i;
+
+/* Имя говорит, что ярлык — фон: либо его так назвали («шум», «фон»), либо он
+   помечен вручную приставкой «Фон: ». */
+function isBackgroundName(name) {
+  const value = (name || '').trim();
+  return BG_TOKEN.test(value) || BG_PREFIX.test(value);
+}
+
+/* Имя, подтверждённое голосовым отпечатком из библиотеки (state.match). Пустая
+   строка, если совпадения нет или оно отклонено. */
+function voiceprintName(id) {
+  const info = state.match[id];
+  return info && info.assigned_name ? String(info.assigned_name) : '';
+}
 
 /* Ярлыки, которые сейчас считаются «фоном». Ярлык, который пользователь уже
    вернул в спикеры (state.keep), больше не группируется — даже если у него
-   всего одна реплика. */
+   всего одна реплика. Узнанный по голосу ярлык тоже остаётся спикером: реплик
+   у него может быть одна-две, но имя не выдумано, а подтверждено отпечатком.
+   В «Фон» такой ярлык попадает только по явной пометке («Фон: », «шум»). */
 function backgroundIds() {
   if (!state.current) return new Set();
   const counts = speakerCounts();
   const ids = new Set();
   for (const id of state.speakers) {
     if (isKept(id)) continue;
-    const name = (state.names[id] || '').trim();
-    if (BG_TOKEN.test(name) || (counts[id] || 0) <= BG_MAX_SEGMENTS) ids.add(id);
+    if (isBackgroundName(state.names[id])) { ids.add(id); continue; }
+    if (voiceprintName(id)) continue;
+    if ((counts[id] || 0) <= BG_MAX_SEGMENTS) ids.add(id);
   }
   return ids;
 }
@@ -2317,9 +2337,9 @@ function backgroundPresent() {
   return state.speakers.some((id) => backgroundIds().has(id) || isBackground(id));
 }
 
-/* Помечен ли ярлык фоном вручную (прописан в state.names[id] == «Фон»). */
+/* Помечен ли ярлык фоном вручную (state.names[id] == «Фон» / «Фон: …»). */
 function isBackground(id) {
-  return (state.names[id] || '').trim().toLowerCase() === 'фон';
+  return isBackgroundName(state.names[id]);
 }
 
 /* Порядок показа ярлыка: сначала обычные спикеры, затем фон. */
@@ -2525,7 +2545,20 @@ function renderChips() {
       accept.className = 'btn-accept';
       accept.textContent = '✓';
       accept.dataset.tip = `Принять имя «${matchInfo.assigned_name}»`;
-      accept.onclick = (e) => { e.stopPropagation(); snapshot(); state.names[id] = matchInfo.assigned_name; delete state.match[id]; markDirty(); sortChips(); renderChips(); renderSegments(); renderBookmarks(); };
+      accept.onclick = (e) => {
+        e.stopPropagation();
+        snapshot();
+        state.names[id] = matchInfo.assigned_name;
+        delete state.match[id];
+        // принятое имя — это человек: короткий ярлык не должен уехать в «Фон»
+        // из-за одного-двух реплик, поэтому решение запоминаем как «оставить»
+        if (!state.keep.includes(id)) state.keep.push(id);
+        markDirty();
+        sortChips();
+        renderChips();
+        renderSegments();
+        renderBookmarks();
+      };
       badge.appendChild(accept);
       const reject = document.createElement('button');
       reject.type = 'button';
@@ -5572,7 +5605,8 @@ $('btn-help').onclick = () => {
      запись расшифровывается как монолог одного спикера. Интерфейс — FastAPI и
      встроенный браузер Microsoft Edge (WebView2). Код приложения — лицензия MIT.</p>
   <p style="margin-top:14px"><button class="btn" id="help-open-folder">Открыть папку с данными</button>
-     <button class="btn" id="help-open-log" style="margin-left:8px">Открыть журнал</button></p>
+     <button class="btn" id="help-open-log" style="margin-left:8px">Открыть журнал</button>
+     <button class="btn" id="help-open-guide" style="margin-left:8px">Руководство пользователя</button></p>
   <div class="help-footer">
     <img src="/static/telegram-qr.png" alt="QR-код Telegram-канала @Nestor_transcribe"
          width="104" height="104">
@@ -5598,6 +5632,18 @@ $('btn-help').onclick = () => {
       window.pywebview.api.open_log_file();
     } else {
       toast('Журнал: %LOCALAPPDATA%\\Nestor\\log.txt');
+    }
+  };
+  const guide = $('help-open-guide');
+  if (guide) guide.onclick = () => {
+    // The installable build ships the full manual next to the program; the
+    // in-app help is a short version, so opening the real guide is better.
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_guide) {
+      window.pywebview.api.open_guide().then((opened) => {
+        if (!opened) toast('Руководство доступно в меню «Пуск» — «Руководство пользователя»');
+      }).catch(() => {});
+    } else {
+      toast('Руководство доступно в меню «Пуск» — «Руководство пользователя»');
     }
   };
   const tg = $('help-tg-link');

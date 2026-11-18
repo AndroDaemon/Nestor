@@ -12,9 +12,9 @@
 
 ## Способ 1. Установщик (обычный путь пользователя)
 
-Файл: `packaging\output\Nestor-Setup-1.5.3.exe` (≈264 МБ, версия 1.5.3).
+Файл: `packaging\output\Nestor-Setup-1.5.4.exe` (≈264 МБ, версия 1.5.4).
 
-1. Запустить `Nestor-Setup-1.5.3.exe`. Ставится в `%LOCALAPPDATA%\Nestor`
+1. Запустить `Nestor-Setup-1.5.4.exe`. Ставится в `%LOCALAPPDATA%\Nestor`
    **без прав администратора**.
 2. Отметить по желанию ярлык на рабочем столе, «Установить».
 3. Запустить Nestor (ярлык или `%LOCALAPPDATA%\Nestor\Nestor.exe`).
