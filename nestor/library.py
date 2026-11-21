@@ -105,6 +105,16 @@ class Recording:
     title: Optional[str] = None
     # free-form notes, edited from the records table (Buzz-style)
     notes: Optional[str] = None
+    # names read off the video frames (participant plates), best first: the
+    # roster offered when the user renames a speaker
+    video_names: List[str] = field(default_factory=list)
+    # the original file has a picture that the player can show beside the text;
+    # filled lazily by the API (one ffmpeg probe per record)
+    has_video: bool = False
+    video_checked: bool = False
+    # seconds between the container start and the first audio frame: the
+    # transcript clock starts at the audio, the picture at the container
+    media_offset: float = 0.0
     segments: List[Segment] = field(default_factory=list)
 
     # ------------------------------------------------------------------ helpers
@@ -150,6 +160,10 @@ class Recording:
             speakers_diff=data.get("speakers_diff"),
             title=data.get("title"),
             notes=data.get("notes"),
+            video_names=[str(name) for name in data.get("video_names", []) or []],
+            has_video=bool(data.get("has_video", False)),
+            video_checked=bool(data.get("video_checked", False)),
+            media_offset=float(data.get("media_offset", 0.0) or 0.0),
         )
         recording.segments = [
             Segment.from_dict(item) for item in data.get("segments", [])

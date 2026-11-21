@@ -1,6 +1,8 @@
 # Голоса (voiceprints) — локальная идентификация спикеров
 
-Статус: реализовано и проверено (229 passed, 1 skipped; живые проверки API+UI пройдены).
+Статус: реализовано и проверено (376 passed, 1 skipped; живые проверки API+UI пройдены).
+С версии 1.6.0 над голосами есть слой «Люди» (`nestor/people.py`) — см. раздел
+«Люди» ниже; интерфейс библиотеки называется «Люди».
 Ветка: master. Версия в `pyproject.toml` — единственный источник; из неё же её
 берут `nestor/__init__.py`-метаданные exe и `MyAppVersion` в `packaging/Nestor.iss`.
 
@@ -33,11 +35,40 @@ Slug — транслитерация имени («Иван Петров» → 
 
 ## Модули
 - `nestor/voiceprints.py` — `VoiceprintLibrary` (add_or_update/list/delete/find/save/load)
+- `nestor/people.py` — `PeopleLibrary`: слой «человек» над голосами (см. «Люди»)
 - `nestor/speaker_embed.py` — обёртка над `sherpa_onnx.SpeakerEmbeddingExtractor`,
   кластерные и посегментные векторы, кэш npz
 - `nestor/speaker_match.py` — `match_clusters`, `MatchThresholds`, `MatchResult`
 - интеграция: `pipeline.py` (стадия «распознавание голосов», полоса 0.95–0.98),
   `web/app.py` (эндпоинты, speaker_match в record.json), `cli.py`
+
+## Люди (с 1.6.0)
+Основная сущность интерфейса — **человек**, а не отдельный голос. `Person`
+хранит `id`, отображаемое `name`, `aliases` (написания), список `voices`
+(slug’и отпечатков) и `comment`. Хранилище — `voiceprints/people.json`.
+
+- **Инвариант «один голос — ровно один человек».** `attach_voice` отбирает
+  голос у прежнего владельца (`_detach_from_others`); `Person._worth_keeping`
+  оставляет человека, если у него есть голос, алиас или заметка.
+- **`PeopleLibrary` — drop-in замена `VoiceprintLibrary` в матчинге**: тот же
+  контракт `vectors()` + `names()`/`display_for()`, поэтому `pipeline.py` и
+  `app.py` переведены на неё без изменения алгоритма узнавания.
+- **Склейка написаний.** `similar_person(name)` ищет человека по нормализованному
+  имени (`same_name`) и алиасам — «Шаталов Дмитрий» и «Шаталов Дмитрий Олегович»
+  схлопываются в одного. UI показывает «Похоже, это …» при вводе имени.
+- **Переименование** (`rename`) обновляет имя человека и `speaker_match[...]
+  ["assigned_name"]` во всех записях, где имя подставлено по голосу; ручные
+  правки не затрагиваются.
+- **`reconcile()`** вызывается после `DELETE /api/voiceprints` и импорта:
+  приводит людей и голоса в согласованное состояние.
+- **Первый запуск** после 1.5.x: `voiceprints.json` → `people.json`, каждый
+  сохранённый голос становится отдельным человеком.
+- API: `GET /api/people`, `GET /api/people/similar?name=`, `POST /api/people`,
+  `PATCH /api/people/{id}` (`{name|display|comment}`), `POST /api/people/{id}/aliases`,
+  `POST /api/people/{id}/voices` (`{voice,detach,merge}`), `POST /api/people/merge`,
+  `DELETE /api/people/{id}`.
+- Экспорт/импорт остаётся файлом голосов (`nestor-voices`, схема v1); после
+  импорта вызывается `people.reconcile()`.
 
 ## Робастное ядро портрета и явные образцы
 Портрет строится не по простому среднему всех реплик спикера: Nestor считает

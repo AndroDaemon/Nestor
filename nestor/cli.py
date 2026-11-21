@@ -457,6 +457,7 @@ def cmd_models(args: argparse.Namespace) -> int:
     from .models import (
         ensure_gigaam_punct,
         ensure_local_diarization,
+        ensure_ocr_models,
         model_root,
     )
 
@@ -476,6 +477,15 @@ def cmd_models(args: argparse.Namespace) -> int:
         return 1
     for name, path in punct.items():
         print(f"  {name}: {path}")
+    # Optional: participant names read off video frames.  Small (~13 MB), and a
+    # failure here must not spoil the models the app cannot start without.
+    try:
+        ocr = ensure_ocr_models(root, force=args.force)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ocr models download failed (names from video disabled): {exc}", file=sys.stderr)
+    else:
+        for name, path in ocr.items():
+            print(f"  {name}: {path}")
     return 0
 
 

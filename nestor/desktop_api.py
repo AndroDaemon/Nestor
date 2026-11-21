@@ -6,16 +6,18 @@ Python: a native "Save As" dialog lets the user choose location and filename.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 try:  # the GUI backend is only needed to actually open the desktop window;
     import webview  # noqa: F401  (kept importable so tests run headless)
@@ -82,10 +84,184 @@ class DesktopApi:
         # native Save As build the same payload as the web endpoint
         self._port = port
         self._token = token or ""
+        # Presenter screen: created lazily on the first click. The JS bridge can
+        # deliver two clicks in parallel threads, and pywebview's load_url waits
+        # for the window to be shown (up to 20 s), so creation, URL loads and
+        # closing are all serialized by a lock and the very first URL is applied
+        # from the "shown" event instead of blocking the bridge call.
+        self._watch_window: Optional[webview.Window] = None
+        self._watch_lock = threading.Lock()
+        self._watch_shown = False
+        self._watch_pending: Optional[str] = None
+        self._watch_pending_close: Optional[webview.Window] = None
 
     def set_window(self, window: webview.Window) -> None:
         """Store the window reference for file dialogs."""
         self._window = window
+
+    # --------------------------------------------------------- presenter screen
+    def _watch_url(self, record_id: str) -> str:
+        url = f"http://127.0.0.1:{self._port}/watch.html?id={quote(str(record_id))}"
+        if self._token:
+            url += f"&token={quote(self._token)}"
+        return url
+
+    def open_watch_window(self, record_id: str) -> bool:
+        """Open the presenter screen, or bring the existing one to the front.
+
+        Called from the JS bridge, i.e. off the GUI main thread - exactly what
+        pywebview needs for windows created after ``start()``.
+        """
+        if self._port is None:
+            return False
+        url = self._watch_url(record_id)
+        with self._watch_lock:
+            window = self._watch_window
+            if window is not None:
+                if not self._watch_shown:
+                    # still starting up: load_url would block the bridge thread
+                    # for up to 20 s waiting for ``shown``; defer it instead
+                    self._watch_pending = url
+                    return True
+                try:
+                    window.load_url(url)
+                    # show() == Show + Activate: bring it forward every time,
+                    # not just on the first click (restore() only un-minimizes)
+                    window.show()
+                    return True
+                except Exception:
+                    self._watch_window = None
+                    self._watch_shown = False
+            if webview is None:
+                return False
+            try:
+                new_window = webview.create_window(
+                    "Экран докладчика",
+                    url,
+                    width=1024,
+                    height=640,
+                    min_size=(420, 260),
+                    background_color="#0d0f12",
+                    text_select=False,
+                    js_api=self,
+                    on_top=False,
+                )
+            except Exception:
+                return False
+            if new_window is None:
+                return False
+            self._watch_window = new_window
+            self._watch_pending = None
+
+            def on_shown() -> None:
+                # runs in its own thread (pywebview fires events that way), so
+                # load_url may safely Invoke into the GUI thread here
+                with self._watch_lock:
+                    is_current = self._watch_window is new_window
+                    if is_current:
+                        self._watch_shown = True
+                        pending = self._watch_pending
+                        self._watch_pending = None
+                    else:
+                        pending = None
+                    close_pending = self._watch_pending_close
+                    self._watch_pending_close = None
+                if pending:
+                    try:
+                        new_window.load_url(pending)
+                    except Exception:
+                        pass
+                if close_pending is new_window:
+                    # closed while we were still starting up: destroy() would
+                    # have blocked on "shown"; now it is safe
+                    try:
+                        new_window.destroy()
+                    except Exception:
+                        pass
+
+            def forget() -> None:
+                with self._watch_lock:
+                    if self._watch_window is new_window:
+                        self._watch_window = None
+                        self._watch_shown = False
+                    if self._watch_pending_close is new_window:
+                        self._watch_pending_close = None
+
+            try:
+                new_window.events.shown += on_shown
+            except Exception:
+                pass
+            try:
+                new_window.events.closed += forget
+            except Exception:
+                pass
+            return True
+
+    def close_watch_window(self) -> bool:
+        """Close the presenter screen (the pane and this window are exclusive)."""
+        with self._watch_lock:
+            window = self._watch_window
+            if window is None:
+                return False
+            self._watch_window = None
+            self._watch_pending = None
+            shown = self._watch_shown
+            self._watch_shown = False
+            if not shown:
+                # still starting up: destroy() would block the bridge thread
+                # waiting for "shown"; let the shown handler finish the job
+                self._watch_pending_close = window
+                return True
+            self._watch_pending_close = None
+        try:
+            window.destroy()
+            return True
+        except Exception:
+            return False
+
+    def watch_window_open(self) -> bool:
+        """Whether the presenter screen still exists (the user may have closed it)."""
+        return self._watch_window is not None
+
+    def set_watch_on_top(self, flag: bool) -> bool:
+        """Toggle always-on-top for the presenter screen.
+
+        pywebview applies ``window.on_top`` by assigning ``Form.TopMost`` from
+        whatever thread happens to call it. Called through the JS bridge that
+        assignment deadlocks the WebView2 message loop and froze the whole app
+        whenever «Поверх» was clicked (the app had to be killed).
+
+        ``SetWindowPos`` is documented as safe to call from any thread, so we
+        drive the native window handle directly and never touch WinForms from a
+        foreign thread. ``SWP_NOACTIVATE`` keeps the toggle from stealing focus.
+        """
+        window = self._watch_window
+        if window is None:
+            return False
+        form = getattr(window, "native", None)
+        handle = getattr(form, "Handle", None)
+        if handle is None:
+            return False
+        try:
+            hwnd = handle.ToInt32()
+        except Exception:
+            return False
+
+        topmost = -1 if flag else -2  # HWND_TOPMOST / HWND_NOTOPMOST
+        flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+        try:
+            user32 = ctypes.windll.user32
+            user32.SetWindowPos.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+            ]
+            user32.SetWindowPos.restype = ctypes.c_int
+            result = user32.SetWindowPos(
+                ctypes.c_void_p(hwnd), ctypes.c_void_p(topmost), 0, 0, 0, 0, flags
+            )
+        except Exception:
+            return False
+        return bool(result)
 
     # ------------------------------------------------------------------ export
     def save_export_as(self, record_id: str, fmt: str = "docx") -> Optional[str]:

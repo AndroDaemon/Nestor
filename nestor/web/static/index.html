@@ -27,6 +27,9 @@
     --radius: 12px;
     --font-ui: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    /* без этого системный выпадающий список <select> рисуется светлым и
+       выбивается из тёмного интерфейса */
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   input { accent-color: var(--accent); }
@@ -377,6 +380,15 @@
   .vp-row .vp-meta { color: var(--muted); font-size: 12px; flex: none; }
   .vp-row .vp-del { flex: none; }
   .vp-row .vp-note { flex: none; padding: 2px 8px; font-size: 12px; }
+  /* the name is a button now: it renames the person everywhere */
+  .vp-row .vp-name.vp-rename {
+    background: none; border: none; padding: 0; color: var(--text);
+    font: inherit; font-weight: 600; cursor: pointer; text-align: left;
+  }
+  .vp-row .vp-name.vp-rename:hover { color: var(--accent); }
+  .vp-row .vp-voices { color: var(--muted); font-size: 12px; flex: none; }
+  .vp-row .vp-merge { flex: none; padding: 2px 8px; font-size: 12px; }
+  .vp-row .vp-aliases { flex: none; }
   .vp-row .vp-comment {
     margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45;
     white-space: pre-wrap; word-break: break-word;
@@ -455,6 +467,19 @@
   }
   #rename-pop input { width: 180px; }
   #rename-pop button { padding: 2px 10px; }
+  /* имена, прочитанные с кадров записи: подсказки отдельной строкой под полем */
+  #rename-pop { flex-wrap: wrap; }
+  #rename-pop .rename-hints {
+    flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px;
+    max-height: 132px; overflow-y: auto; margin-top: 2px;
+  }
+  #rename-pop .rename-hint {
+    padding: 2px 8px; font-size: 11px; border-radius: 999px; cursor: pointer;
+    background: var(--panel-2, rgba(255,255,255,.06));
+    border: 1px solid var(--line-2); color: var(--text);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #rename-pop .rename-hint:hover { border-color: var(--accent); color: var(--accent); }
 
   /* sheet */
   /* Расшифровка занимает всё место между «Записями» и спикерами: у листа нет
@@ -508,6 +533,31 @@
     flex: 1 1 auto; min-width: 0; min-height: 0;
     overflow-y: auto; padding: 0 6px 22px 0;
   }
+  /* Видео рядом с расшифровкой: включается вручную и НЕ липкая — на
+     маленьких экранах панель уезжает при прокрутке, а не отнимает высоту
+     у текста. На больших экранах ею пользуются, на втором мониторе —
+     отдельным окном «Экран докладчика». */
+  .video-pane {
+    position: relative; margin: 4px 0 12px; background: #000;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .video-pane video {
+    display: block; width: 100%; max-height: 40vh;
+    object-fit: contain; background: #000;
+  }
+  .video-pane .video-close {
+    position: absolute; top: 8px; right: 8px; width: 28px; height: 28px;
+    display: grid; place-items: center; border-radius: 8px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.25);
+    background: rgba(10,12,16,.72); color: #fff; font: inherit; line-height: 1;
+  }
+  .video-pane .video-close:hover { background: rgba(30,36,46,.9); }
+  .video-pane .video-note {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    padding: 18px 56px; text-align: center; font-size: 13px; line-height: 1.5;
+    color: var(--muted); background: #000;
+  }
+  #btn-video.active { border-color: var(--accent); color: var(--accent); }
   .speakers-panel {
     flex: none; width: 224px; align-self: stretch;
     display: flex; flex-direction: column; gap: 3px;
@@ -910,8 +960,11 @@
         <button data-fmt="json">Данные — <b>.json</b></button>
         <div class="menu-sep"></div>
         <button id="btn-copy-text" data-tip="Текст расшифровки одним абзацем — в системный буфер обмена">Скопировать в буфер</button>
+        <button id="btn-copy-stamps" data-tip="Скопировать с таймстемпами: «[00:12:34,120] Имя: текст»">Скопировать с таймстемпами</button>
       </div>
     </div>
+    <button class="btn top-action hidden" id="btn-video" data-tip="Показать видео рядом с расшифровкой">Видео</button>
+    <button class="btn top-action hidden" id="btn-watch" data-tip="Открыть экран докладчика — удобно на втором мониторе">Экран ▸</button>
   </div>
 </header>
 
@@ -934,7 +987,7 @@
     </div>
     <div class="rail-list" id="rail"></div>
     <div class="rail-foot">
-      <button type="button" class="rail-jump" id="btn-voices" data-tip="Сохранённые голоса, имена и точность узнавания">Голоса</button>
+      <button type="button" class="rail-jump" id="btn-voices" data-tip="Люди: имена, написания, голоса и точность узнавания">Люди</button>
       <button type="button" class="rail-jump" id="btn-glossary" data-tip="Словарь терминов: что Nestor заменяет и на что">Словарь терминов</button>
       <button class="help-btn" id="btn-help" data-tip="Как работает Nestor, приватность и лицензии">?</button>
       <div id="app-version" title="Версия Nestor">Nestor</div>
@@ -1001,7 +1054,7 @@
           </label>
           <label class="field wide" style="display:flex;align-items:center;gap:8px">
             <input type="checkbox" id="vp-match" checked style="width:auto">
-            <span>Подставлять знакомые имена (сохранено голосов: <span id="vp-count">0</span>)</span>
+            <span>Подставлять знакомые имена (людей: <span id="vp-count">0</span>)</span>
           </label>
           <details class="more">
             <summary>Дополнительно</summary>
@@ -1070,6 +1123,11 @@
         </div>
         <div class="sheet-body">
           <div class="sheet-main">
+            <div class="video-pane hidden" id="video-pane">
+              <video id="video-el" muted playsinline preload="metadata"></video>
+              <div class="video-note hidden" id="video-note"></div>
+              <button class="video-close" id="video-close" data-tip="Скрыть видео">✕</button>
+            </div>
             <div class="result-bar hidden" id="result-bar"></div>
             <div class="filter-bar hidden" id="filter-bar"></div>
             <div class="sel-bar hidden" id="sel-bar"></div>
@@ -1116,6 +1174,7 @@
     <div class="dock-actions">
       <button class="btn" id="btn-follow" data-tip="Автопрокрутка: таймлайн следует за текущей репликой">⇣</button>
       <select id="speed" data-tip="Скорость воспроизведения записи">
+        <option value="0.5">0.5×</option>
         <option value="0.75">0.75×</option>
         <option value="1" selected>1×</option>
         <option value="1.25">1.25×</option>
@@ -1210,7 +1269,8 @@ const state = {
   keep: [],            // ярлыки, которые пользователь вернул в спикеры (не фон)
   colorIndex: {},      // speaker id -> stable colour slot (assigned on first sight)
   nextColor: 0,        // next free colour slot
-  voiceprints: [],     // saved voices: {slug, name, ...}
+  voiceprints: [],     // saved voices: {slug, name, person_id, ...}
+  people: [],          // people: {id, name, aliases, voices, comment, ...}
   glossary: null,      // {source, path, count, terms:[{term,aliases}]}
   glossaryQuery: '',   // glossary panel search filter (lower-case)
   glossarySort: 'asc', // glossary table sort by term: asc | desc
@@ -1240,6 +1300,17 @@ function fmt(ts) {
   const h = Math.floor(ts / 3600), m = Math.floor(ts % 3600 / 60), s = Math.floor(ts % 60);
   const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+/* Timestamp with milliseconds, as the exporters write it: "[00:12:34,120]". */
+function fmtStampMs(ts) {
+  ts = Math.max(0, ts || 0);
+  const total = Math.round(ts * 1000);
+  const h = Math.floor(total / 3600000);
+  const m = Math.floor(total % 3600000 / 60000);
+  const s = Math.floor(total % 60000 / 1000);
+  const ms = total % 1000;
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(h)}:${p(m)}:${p(s)},${p(ms, 3)}`;
 }
 /* Human duration for the timings line: "12 с", "1 мин 05 с", "1 ч 02 мин". */
 function fmtElapsed(sec) {
@@ -1477,6 +1548,7 @@ const STAGE_RU = {
   diarization: 'разбивка по спикерам',
   transcription: 'распознавание',
   voiceprints: 'распознавание голосов',
+  names: 'имена из видео',
   saving: 'сохранение',
   done: 'готово',
 };
@@ -2214,6 +2286,8 @@ async function openRecording(id) {
   audio.load();
 
   setTopActions(true);
+  applyVideoPane();
+  broadcastPlayerState();
   renderChips();
   renderSegments();
   renderBookmarks();
@@ -2732,7 +2806,7 @@ function renderResultBar() {
    chips: saving only this label's fragments would store a half-voice under
    a name the user already uses elsewhere. Offer to glue the twins first
    (recommended) or save just this fragment. */
-function showVoiceMergeChoice(btn, id, name, twins, onSaved) {
+function showVoiceMergeChoice(btn, id, name, twins) {
   const existing = document.getElementById('voice-merge-pop');
   if (existing) existing.remove();
   const pop = document.createElement('div');
@@ -2798,8 +2872,50 @@ function showVoiceMergeChoice(btn, id, name, twins, onSaved) {
   yes.focus();
 }
 
+/* The person behind a name, if that name is known to the library at all. */
+function personNamed(name) {
+  const wanted = (name || '').trim().toLowerCase();
+  if (!wanted) return null;
+  for (const p of (state.people || [])) {
+    const spellings = [p.name, ...(p.aliases || [])];
+    if (spellings.some((s) => (s || '').trim().toLowerCase() === wanted)) return p;
+  }
+  return null;
+}
+
+/* Rename everywhere, whichever layer knows the name: a person (their voices
+   and every recording) or a bare voice. Returns true on success. */
+async function renameEverywhere(oldName, newName, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const person = personNamed(oldName);
+    const res = await fetch(
+      person ? '/api/people/' + encodeURIComponent(person.id) : '/api/voiceprints/rename',
+      {
+        method: person ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(person ? { name: newName } : { old: oldName, new: newName }),
+      });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    for (const [id, name] of Object.entries(state.names)) {
+      if (name === oldName) state.names[id] = newName;
+    }
+    markDirty();
+    if (typeof loadVoiceprints === 'function') loadVoiceprints();
+    sortChips(); renderChips(); renderSegments(); renderBookmarks();
+    toast(`Переименовано везде · записей: ${data.changed ?? 0}`);
+    closeModal();
+    return true;
+  } catch (err) {
+    toast('Не удалось переименовать: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = '⇄'; }
+    return false;
+  }
+}
+
 /* Rename one speaker EVERYWHERE: every recording that uses the name and
-   the saved-voice library (the name is the library key). */
+   the person (or bare voice) in the library. */
 async function renameSpeakerEverywhere(btn, oldName) {
   showModal('');
   const body = $('modal-body');
@@ -2830,30 +2946,8 @@ async function renameSpeakerEverywhere(btn, oldName) {
   const commit = async () => {
     const newName = input.value.trim();
     if (!newName || newName === oldName) { closeModal(); return; }
-    ok.disabled = true; cancel.disabled = true; btn.disabled = true; btn.textContent = '⏳';
-    try {
-      const res = await fetch('/api/voiceprints/rename', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old: oldName, new: newName }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
-      let renamedCurrent = false;
-      for (const [id, name] of Object.entries(state.names)) {
-        if (name === oldName) { state.names[id] = newName; renamedCurrent = true; }
-      }
-      if (renamedCurrent) { markDirty(); }
-      if (typeof loadVoiceprints === 'function') loadVoiceprints();
-      sortChips(); renderChips(); renderSegments(); renderBookmarks();
-      toast(`Переименовано везде · записей: ${data.changed ?? 0}`);
-      closeModal();
-    } catch (err) {
-      toast('Не удалось переименовать: ' + err.message);
-      btn.disabled = false; btn.textContent = '⇄';
-    } finally {
-      ok.disabled = false; cancel.disabled = false;
-    }
+    await renameEverywhere(oldName, newName, btn);
+    ok.disabled = false; cancel.disabled = false;
   };
   ok.onclick = commit;
   input.onkeydown = (e) => { if (e.key === 'Enter') commit(); };
@@ -2940,10 +3034,62 @@ function showRenamePopup(who, label) {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     if (e.key === 'Escape') { hideRenamePopup(); }
   };
-  pop.appendChild(input); pop.appendChild(ok); pop.appendChild(cancel);
+  pop.appendChild(input);
+
+  /* Имена, впечатанные в кадр записи (TrueConf): готовый список участников,
+     чтобы не набирать ФИО вручную. Это подсказки, а не догадки — кто из них
+     кто, по-прежнему решает пользователь. */
+  const roster = (state.current && state.current.video_names) || [];
+  const taken = new Set(Object.values(state.names).map((v) => String(v).trim().toLowerCase()));
+  const hints = roster.filter((n) => n && !taken.has(n.trim().toLowerCase()));
+  if (hints.length) {
+    const box = document.createElement('div');
+    box.className = 'rename-hints';
+    for (const name of hints) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'rename-hint';
+      chip.textContent = name;
+      chip.title = 'Взять имя из кадра записи';
+      chip.onclick = () => { input.value = name; input.focus(); };
+      box.appendChild(chip);
+    }
+    pop.appendChild(box);
+  } else if (label) {
+    hintOnName(label, pop);
+  }
+
+  pop.appendChild(ok); pop.appendChild(cancel);
   document.body.appendChild(pop);
   placePopup(pop, who);
   input.focus(); input.select();
+}
+
+/* No names in the frame — but maybe this speaker is somebody already known
+   under a longer or shorter name. Ask the library and offer to apply it. */
+function hintOnName(label, pop) {
+  const current = (state.names[label] || '').trim();
+  fetch('/api/people/similar?name=' + encodeURIComponent(current || label))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (!data || !data.person) return;
+      const known = data.person.name;
+      if (known.trim().toLowerCase() === current.trim().toLowerCase()) return;
+      const box = document.createElement('div');
+      box.className = 'rename-hints';
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'rename-hint';
+      chip.textContent = 'Похоже, это ' + known;
+      chip.title = 'Взять имя из сохранённых голосов';
+      chip.onclick = () => {
+        const input = pop.querySelector('input');
+        if (input) { input.value = known; input.focus(); }
+      };
+      box.appendChild(chip);
+      pop.insertBefore(box, pop.querySelector('button'));
+    })
+    .catch(() => {});
 }
 function hideRenamePopup() {
   const existing = document.getElementById('rename-pop');
@@ -3225,6 +3371,12 @@ function focusChipName(id) {
    (two chips with the same name can then be merged with one click). */
 function attachNameSuggestions(input, selfId) {
   const known = new Map();  // name -> source note
+  for (const person of state.people || []) {
+    for (const spelling of [person.name, ...(person.aliases || [])]) {
+      const name = (spelling || '').trim();
+      if (name) known.set(name.toLowerCase(), name);
+    }
+  }
   for (const vp of state.voiceprints || []) {
     const name = (vp.name || '').trim();
     if (name) known.set(name.toLowerCase(), name);
@@ -3870,15 +4022,15 @@ async function download(fmt) {
   link.remove();
 }
 
-/* Copy the plain transcript text to the system clipboard, so it can be pasted
-   into another app (e.g. a chat window for summarising). */
-async function copyTranscriptToClipboard() {
+/* Copy the transcript to the system clipboard — either plain lines or with a
+   leading "[00:12:34,120] " timestamp, the same shape the exporters write. */
+async function copyTranscriptToClipboard(withStamps = false) {
   if (!state.current || !state.current.segments.length) {
     toast('Нет распознанного текста');
     return;
   }
   const text = state.current.segments
-    .map((seg) => `${speakerName(seg.speaker)}: ${seg.text}`)
+    .map((seg) => (withStamps ? `[${fmtStampMs(seg.start)}] ` : '') + `${speakerName(seg.speaker)}: ${seg.text}`)
     .join('\n');
   const lines = state.current.segments.length;
 
@@ -4363,12 +4515,19 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => { waveDrag.active = false; });
 $('wave').addEventListener('dblclick', () => { state.view = null; drawWave(); });
 
-$('btn-play').onclick = () => {
+function togglePlayback() {
   state.playUntil = null;
-  if (audio.paused) { soloSeekIntoView(); audio.play(); $('btn-play').textContent = '❚❚'; }
-  else { audio.pause(); $('btn-play').textContent = '▶'; }
-};
-audio.onended = () => { $('btn-play').textContent = '▶'; };
+  if (audio.paused) {
+    soloSeekIntoView();
+    audio.play().catch(() => {});
+    $('btn-play').textContent = '❚❚';
+  } else {
+    audio.pause();
+    $('btn-play').textContent = '▶';
+  }
+}
+$('btn-play').onclick = togglePlayback;
+audio.onended = () => { $('btn-play').textContent = '▶'; $('video-el').pause(); broadcastPlayerState(); };
 audio.addEventListener('play', soloSync);
 audio.addEventListener('pause', soloSync);
 
@@ -4430,14 +4589,295 @@ audio.ontimeupdate = () => {
   $('t-dur').textContent = fmt(audio.duration || (state.current ? state.current.duration : 0));
   drawWave();
   highlightActiveSegment();
+  syncVideoFrame();
+  broadcastPlayerState();
 };
 audio.onloadedmetadata = () => {
   $('t-dur').textContent = fmt(audio.duration);
   drawWave();
+  syncVideoFrame(true);
 };
-$('speed').onchange = (e) => { audio.playbackRate = parseFloat(e.target.value); };
+$('speed').onchange = (e) => { setPlaybackRate(parseFloat(e.target.value)); };
 $('btn-follow').onclick = (e) => { state.follow = !state.follow; e.target.classList.toggle('active', state.follow); };
 $('btn-follow').classList.add('active');
+
+/* ---------------------------------------------------- видео и второй экран
+   Главное окно остаётся мастером времени: звук идёт из <audio>, видео только
+   следует за ним (muted, иначе эхо). Второе окно «Экран докладчика» ведомое:
+   получает позицию и текст текущей реплики по BroadcastChannel и шлёт обратно
+   команды. Поэтому переименование спикера сразу видно на втором экране.
+
+   Панель в главном окне и второе окно — взаимоисключающие режимы: два видео
+   одновременно только путают и грузят декодер впустую. */
+const VIDEO_MODE_KEY = 'nestor.videoMode';
+state.videoMode = (() => {
+  try {
+    const saved = localStorage.getItem(VIDEO_MODE_KEY);
+    if (saved === 'pane' || saved === 'window' || saved === 'off') return saved;
+    // перенос старого выбора «показана ли панель»
+    if (localStorage.getItem('nestor.videoPane') === '1') return 'pane';
+  } catch (err) {}
+  return 'off';
+})();
+let watchWindowRef = null;  // браузерный режим: ссылка на window.open
+
+function videoOffset() {
+  return Number(state.current && state.current.media_offset) || 0;
+}
+
+function saveVideoMode() {
+  try { localStorage.setItem(VIDEO_MODE_KEY, state.videoMode); } catch (err) {}
+}
+
+/* Закрыть второе окно, если оно открыто (нативное или браузерное). */
+function closeWatchWindow() {
+  if (watchWindowRef) {
+    try { watchWindowRef.close(); } catch (err) {}
+    watchWindowRef = null;
+  }
+  const api = window.pywebview && window.pywebview.api;
+  if (api && api.close_watch_window) {
+    try { api.close_watch_window(); } catch (err) {}
+  }
+}
+
+/* Пользователь мог закрыть второе окно сам — тогда режим снова «выкл». */
+async function refreshWatchWindowState() {
+  if (state.videoMode !== 'window') return;
+  const api = window.pywebview && window.pywebview.api;
+  if (api && api.watch_window_open) {
+    try {
+      if (!(await api.watch_window_open())) {
+        state.videoMode = 'off';
+        saveVideoMode();
+        applyVideoPane();
+      }
+    } catch (err) {}
+    return;
+  }
+  if (watchWindowRef && watchWindowRef.closed) {
+    watchWindowRef = null;
+    state.videoMode = 'off';
+    saveVideoMode();
+    applyVideoPane();
+  }
+}
+window.addEventListener('focus', refreshWatchWindowState);
+
+/* Показать/скрыть панель по текущей записи и сохранённому режиму. Для
+   аудиозаписей кнопки просто исчезают — выбор пользователя не сбрасывается. */
+function applyVideoPane() {
+  const rec = state.current;
+  const can = !!(rec && rec.has_video);
+  const paneOn = can && state.videoMode === 'pane';
+  const pane = $('video-pane');
+  const el = $('video-el');
+  pane.classList.toggle('hidden', !paneOn);
+  $('btn-video').classList.toggle('hidden', !can);
+  $('btn-watch').classList.toggle('hidden', !can);
+  $('btn-video').classList.toggle('active', !!(can && state.videoMode === 'pane'));
+  $('btn-watch').classList.toggle('active', !!(can && state.videoMode === 'window'));
+  if (!paneOn) {
+    if (!el.paused) el.pause();
+    if (!can && el.dataset.rec) {
+      el.dataset.rec = '';
+      el.removeAttribute('src');
+      el.load();
+      setVideoNote('');
+    }
+    return;
+  }
+  if (el.dataset.rec !== rec.id) {
+    el.dataset.rec = rec.id;
+    setVideoNote('');
+    el.src = withToken('/api/recordings/' + encodeURIComponent(rec.id) + '/media?video=1');
+    el.load();
+  }
+  syncVideoFrame(true);
+}
+
+/* Формат может не проигрываться встроенным плеером (например, mkv или avi).
+   Молчаливый чёрный прямоугольник выглядит как поломка — скажем честно. */
+function setVideoNote(text) {
+  const note = $('video-note');
+  note.textContent = text || '';
+  note.classList.toggle('hidden', !text);
+}
+
+$('video-el').onerror = () => {
+  if (!state.current || state.videoMode !== 'pane') return;
+  const rec = state.current;
+  if (/\.(mkv|avi)$/i.test(rec.filename || '')) {
+    setVideoNote('Встроенный плеер не показывает .mkv и .avi — звук и расшифровка работают как обычно. Исходный файл можно открыть системным проигрывателем.');
+  } else {
+    setVideoNote('Не удалось показать видео — возможно, повреждён файл или формат не поддержан. Звук и расшифровка работают.');
+  }
+};
+$('video-el').onloadeddata = () => setVideoNote('');
+
+function setVideoPane(on) {
+  if (on) closeWatchWindow();
+  state.videoMode = on ? 'pane' : 'off';
+  saveVideoMode();
+  applyVideoPane();
+}
+
+/* Подтянуть картинку к звуку. Порог 0.25 с: чаще дёргать currentTime вредно —
+   видео начинает «заикаться» на ровном месте. */
+function syncVideoFrame(force) {
+  const el = $('video-el');
+  if (!state.current || !state.current.has_video || state.videoMode !== 'pane') return;
+  if (!el.src || el.readyState < 1) return;
+  const target = Math.max(0, (audio.currentTime || 0) + videoOffset());
+  if (force || Math.abs((el.currentTime || 0) - target) > 0.25) {
+    try { el.currentTime = target; } catch (err) {}
+  }
+  if (Math.abs((el.playbackRate || 1) - audio.playbackRate) > 0.001) {
+    el.playbackRate = audio.playbackRate;
+  }
+  if (!audio.paused && el.paused) el.play().catch(() => {});
+  else if (audio.paused && !el.paused) el.pause();
+}
+
+/* Перетаскивание по волне шлёт десятки seeked подряд: не перематываем видео
+   на каждый, иначе оно захлёбывается. */
+let videoSeekTimer = null;
+function scheduleVideoSeek() {
+  if (videoSeekTimer) clearTimeout(videoSeekTimer);
+  videoSeekTimer = setTimeout(() => syncVideoFrame(true), 120);
+}
+
+audio.addEventListener('play', () => { syncVideoFrame(true); broadcastPlayerState(); });
+audio.addEventListener('pause', () => { syncVideoFrame(true); broadcastPlayerState(); });
+audio.addEventListener('seeked', scheduleVideoSeek);
+audio.addEventListener('ratechange', () => { syncVideoFrame(); broadcastPlayerState(); });
+
+$('btn-video').onclick = () => setVideoPane(state.videoMode !== 'pane');
+$('video-close').onclick = () => setVideoPane(false);
+
+function setPlaybackRate(rate) {
+  const value = Math.min(2, Math.max(0.5, Number(rate) || 1));
+  audio.playbackRate = value;
+  $('speed').value = String(value);
+  syncVideoFrame();
+  broadcastPlayerState();
+}
+
+let playerChannel = null;
+try { playerChannel = new BroadcastChannel('nestor-player'); } catch (err) {}
+
+/* Текущая реплика для субтитров. Пусто в паузах длиннее 2.5 с; иначе на
+   втором экране висела бы фраза, которую уже никто не говорит. */
+function currentSegInfo() {
+  const rec = state.current;
+  if (!rec) return null;
+  const now = audio.currentTime || 0;
+  let best = null;
+  for (const seg of rec.segments) {
+    if (seg.start <= now + 0.05) best = seg; else break;
+  }
+  if (!best || now > best.end + 2.5) return null;
+  return {
+    id: best.id,
+    text: best.text,
+    name: speakerName(best.speaker),
+    color: speakerColor(best.speaker),
+    start: best.start,
+    end: best.end,
+  };
+}
+
+function broadcastPlayerState() {
+  if (!playerChannel) return;
+  const rec = state.current;
+  let message;
+  if (!rec) {
+    message = { kind: 'idle' };
+  } else {
+    message = {
+      kind: 'state',
+      rec: rec.id,
+      t: audio.currentTime || 0,
+      playing: !audio.paused && !audio.ended,
+      rate: audio.playbackRate || 1,
+      offset: videoOffset(),
+      title: rec.title || rec.filename || '',
+      duration: rec.duration || 0,
+      seg: currentSegInfo(),
+    };
+  }
+  try { playerChannel.postMessage(message); } catch (err) {}
+}
+
+if (playerChannel) {
+  playerChannel.onmessage = (event) => {
+    const msg = event.data || {};
+    if (msg.kind === 'hello') { broadcastPlayerState(); return; }
+    if (msg.kind !== 'cmd' || !state.current) return;
+    if (msg.cmd === 'toggle') {
+      togglePlayback();
+    } else if (msg.cmd === 'play') {
+      audio.play().catch(() => {});
+    } else if (msg.cmd === 'pause') {
+      audio.pause();
+    } else if (msg.cmd === 'seek') {
+      const limit = audio.duration || state.current.duration || 0;
+      const next = (audio.currentTime || 0) + Number(msg.delta || 0);
+      seek(limit ? Math.max(0, Math.min(limit - 0.05, next)) : Math.max(0, next));
+    } else if (msg.cmd === 'rate') {
+      setPlaybackRate(Number(msg.rate));
+    }
+  };
+}
+
+/* Закрыли главное окно — второе не должно продолжать жить своей жизнью. */
+window.addEventListener('pagehide', () => {
+  if (!playerChannel) return;
+  try { playerChannel.postMessage({ kind: 'bye' }); } catch (err) {}
+});
+
+async function openWatchWindow() {
+  if (!state.current) return;
+  if (state.videoMode === 'pane') setVideoPane(false);  // панель и окно — не вместе
+  state.videoMode = 'window';
+  saveVideoMode();
+  applyVideoPane();
+  if (playerChannel) { try { playerChannel.postMessage({ kind: 'hello' }); } catch (err) {} }
+  const api = window.pywebview && window.pywebview.api;
+  if (api && api.open_watch_window) {
+    try {
+      const ok = await api.open_watch_window(state.current.id);
+      if (ok === false) {
+        state.videoMode = 'off';
+        saveVideoMode();
+        applyVideoPane();
+        toast('Не удалось открыть окно «Экран докладчика»');
+      }
+    } catch (err) {
+      state.videoMode = 'off';
+      saveVideoMode();
+      applyVideoPane();
+      toast('Не удалось открыть окно «Экран докладчика»');
+    }
+    return;
+  }
+  if (watchWindowRef && !watchWindowRef.closed) {
+    // уже открыто: запись переключится по BroadcastChannel, нужно лишь поднять
+    try { watchWindowRef.focus(); } catch (err) {}
+    return;
+  }
+  const url = withToken('/watch.html?id=' + encodeURIComponent(state.current.id));
+  const win = window.open(url, 'nestor-watch', 'width=1100,height=680');
+  if (!win) {
+    state.videoMode = 'off';
+    saveVideoMode();
+    applyVideoPane();
+    toast('Браузер заблокировал окно — разрешите всплывающие окна для Nestor');
+    return;
+  }
+  watchWindowRef = win;
+}
+$('btn-watch').onclick = openWatchWindow;
 
 /* -------------------------------------------------------------------- upload */
 const drop = $('drop');
@@ -4955,6 +5395,17 @@ function goHome() {
   $('sheet-view').classList.add('hidden');
   $('dock').classList.add('hidden');
   setTopActions(false);
+  const video = $('video-el');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.dataset.rec = '';
+    video.load();
+  }
+  $('video-pane').classList.add('hidden');
+  if (playerChannel) {
+    try { playerChannel.postMessage({ kind: 'bye' }); } catch (err) {}
+  }
   state.current = null;
   state.undo = [];
   state.redo = [];
@@ -5048,7 +5499,7 @@ function showProcessDialog(rec, mode) {
     </div>` : ''}
     <div class="field wide" style="display:flex;align-items:center;gap:8px;margin-top:10px">
       <input type="checkbox" id="pd-match" style="width:auto">
-      <span>Подставлять знакомые имена (голоса: <span id="pd-vp-count">${state.voiceprints.length}</span>)</span>
+      <span>Подставлять знакомые имена (людей: <span id="pd-vp-count">${(state.people || []).length}</span>)</span>
     </div>
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px">
       <button class="btn" id="pd-cancel">Отмена</button>
@@ -5082,7 +5533,7 @@ function showProcessDialog(rec, mode) {
     group.addEventListener('click', (e) => setPill('pd-merge-pills', e.target));
   }
   $('pd-match').checked = job.match_voiceprints !== false;
-  $('pd-vp-count').textContent = state.voiceprints.length;
+  $('pd-vp-count').textContent = (state.people || []).length;
   $('modal').classList.remove('hidden');
   const close = () => {
     $('modal').classList.add('hidden');
@@ -5415,6 +5866,10 @@ $('btn-copy-text').onclick = () => {
   $('export-menu').classList.add('hidden');
   copyTranscriptToClipboard();
 };
+$('btn-copy-stamps').onclick = () => {
+  $('export-menu').classList.add('hidden');
+  copyTranscriptToClipboard(true);
+};
 $('modal-close').onclick = () => $('modal').classList.add('hidden');
 $('modal').onclick = (e) => { if (e.target === $('modal')) $('modal').classList.add('hidden'); };
 
@@ -5521,11 +5976,11 @@ $('btn-help').onclick = () => {
      на несколько ярлыков.</p>
   <p><b>Начать сразу / звук по окончании</b> — только удобство: расшифровка
      стартует без нажатия кнопки, а по завершении проигрывается сигнал.</p>
-  <p><b>Точность подстановки знакомых имён</b> настраивается в разделе «Голоса»
+  <p><b>Точность подстановки знакомых имён</b> настраивается в разделе «Люди»
      (кнопка рядом с тумблером имён): «Насколько уверенно узнавать» — насколько
      голос должен совпасть, чтобы подписать имя; «Не путать похожие голоса» и
      «Сверять по всей записи» появляются, когда в библиотеке больше одного голоса.</p>
-  <p><b>Голоса</b> — фирменная возможность: откройте запись, введите имя спикера
+  <p><b>Люди</b> — фирменная возможность: откройте запись, введите имя спикера
      на ярлыке и сохраните голос кнопкой 🎙. Nestor запомнит голос и на следующих
      записях сам подставит знакомые имена. Если одно имя встречается у нескольких
      ярлыков, 🎙 предложит сперва склеить их в одного человека — так голос будет
@@ -5537,14 +5992,32 @@ $('btn-help').onclick = () => {
      вручную — выделите 2–5 характерных реплик этого спикера (см. «Ручная правка
      спикеров») и нажмите 🎙: портрет соберётся только по выделенным репликам, без
      автоматического отсева.</p>
-  <p><b>Раздел «Голоса»</b>: все сохранённые голоса с заметками (✎) и датой
-     последнего обновления. Оттуда голоса можно выгрузить одним файлом и
-     перенести на другой компьютер, а чужой файл голосов — импортировать.
+  <p><b>Раздел «Люди»</b>: каждый человек — одно имя (или несколько написаний),
+     все его голоса, заметка (✎) и дата последнего обновления. Оттуда людей можно
+     выгрузить одним файлом и перенести на другой компьютер, а чужой файл —
+     импортировать. Переименование человека меняет имя во всех записях, где оно
+     подставлялось по голосу; ручные правки в записях не затрагиваются.
       Повторное сохранение того же голоса (с другой записи или с другой части
       записи) <b>дополняет</b> портрет: голос становится точнее, а не
       заменяется. Один раз сохранили — и Nestor узнаёт человека даже через
      неделю.</p>
   
+  <h2>Видео и второй экран</h2>
+  <p>У записей с картинкой в верхней панели появляются кнопки «Видео» и «Экран ▸».
+     Это два взаимоисключающих режима: видео показывается либо панелью рядом с
+     расшифровкой, либо отдельным окном — вместе они не открываются.</p>
+  <p><b>Видео рядом с расшифровкой</b> («Видео») показывает панель над текстом.
+     Панель не закреплена: при прокрутке текста она уезжает вверх и не отнимает
+     высоту у расшифровки. Выбор запоминается. Для записей без картинки кнопок нет.</p>
+  <p><b>Экран докладчика</b> («Экран ▸») открывает отдельное окно с крупным видео
+     и субтитрами — удобно на втором мониторе или телевизоре. Нажатие кнопки всегда
+     выводит это окно на передний план; повторное нажатие просто поднимает его.
+     Звук остаётся в главном окне, поэтому эха нет; пауза, перемотка ±5 с и скорость
+     работают из любого окна, а переименование спикера сразу видно в субтитрах.
+     Кнопка «Поверх» держит окно над другими программами. Горячие клавиши: пробел —
+     пауза, ← и → — ±5 секунд, S — субтитры, F — полный экран. В браузерной версии
+     окно откроется отдельной вкладкой — разрешите всплывающие окна для Nestor.</p>
+
   <p><b>Правка реплик</b>: текст правится прямо в реплике. «Подклеить»
      присоединяет реплику к предыдущей. «Разделить» режет реплику в месте
      курсора: кликните в текст, поставьте курсор в точку разделения и нажмите
@@ -5709,45 +6182,59 @@ async function loadVoiceprints() {
     const data = await (await fetch('/api/voiceprints')).json();
     state.voiceprints = data.voiceprints || [];
   } catch { state.voiceprints = []; }
-  $('vp-count').textContent = state.voiceprints.length;
+  try {
+    const data = await (await fetch('/api/people')).json();
+    state.people = data.people || [];
+  } catch { if (!state.people) state.people = []; }
+  $('vp-count').textContent = (state.people || []).length;
+}
+
+/* One row of the people table: name (click to rename everywhere), pen for the
+   note, a delete that takes the person's voices with it. */
+function personRow(p) {
+  const spellings = [p.name, ...(p.aliases || [])];
+  const aliasLine = p.aliases && p.aliases.length
+    ? `<div class="vp-meta vp-aliases">ещё: ${p.aliases.map(escapeHtml).join(', ')}</div>`
+    : '';
+  const voiceCount = (p.voices || []).length;
+  const updated = p.updated_at ? new Date(p.updated_at) : null;
+  const updatedStr = updated && !isNaN(updated)
+    ? updated.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null;
+  return `
+    <div class="vp-row" data-id="${p.id}" data-spellings="${escapeHtml(spellings.join('|'))}">
+      <div class="vp-main">
+        <div class="vp-line">
+          <button class="vp-name vp-rename" data-tip="Переименовать везде — во всех записях и в сохранённых голосах">${escapeHtml(p.name)}</button>
+          <span class="vp-voices">${voiceCount} ${voiceCount === 1 ? 'голос' : 'голоса'}${(p.total_duration_sec ? ' · ' + (p.total_duration_sec / 60).toFixed(1) + ' мин' : '')}</span>
+          <button class="vp-note btn" data-tip="Заметка о человеке (для себя)">✎</button>
+          <button class="vp-merge btn" data-tip="Склеить с другим человеком">Склеить</button>
+          <button class="vp-del btn" data-tip="Удалить человека и его голоса">Удалить</button>
+        </div>
+        <div class="vp-line2">
+          ${aliasLine}
+          ${updatedStr ? `<span class="vp-meta">обновлён: ${updatedStr}</span>` : ''}
+        </div>
+        ${p.comment ? `<div class="vp-comment">${escapeHtml(p.comment)}</div>` : ''}
+      </div>
+    </div>`;
 }
 
 function renderVoicesPanel() {
-  const rows = state.voiceprints.map(v => {
-    const updated = v.updated_at ? new Date(v.updated_at) : null;
-    const updatedStr = updated && !isNaN(updated)
-      ? updated.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : null;
-    return `
-    <div class="vp-row" data-slug="${v.slug}">
-      <input type="checkbox" class="vp-check" style="width:auto" aria-label="Выбрать голос ${escapeHtml(v.name)}">
-      <div class="vp-main">
-        <div class="vp-line">
-          <span class="vp-name">${escapeHtml(v.name)}</span>
-          <button class="vp-note btn" data-tip="Заметка к голосу (для себя)">✎</button>
-          <button class="vp-del btn" data-tip="Удалить голос">Удалить</button>
-        </div>
-        <div class="vp-line2">
-          <span class="vp-meta">${v.num_utterances} запис(ей) · ${(v.total_duration_sec / 60).toFixed(1)} мин</span>
-          <span class="vp-meta">обновлён: ${updatedStr || '—'}</span>
-        </div>
-        ${v.comment ? `<div class="vp-comment">${escapeHtml(v.comment)}</div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-  const many = state.voiceprints.length >= 2;
+  const rows = (state.people || []).map(personRow).join('');
+  const many = (state.people || []).length >= 2;
   return `
-    <h1>Голоса</h1>
-    <p class="sub" style="text-align:left">Сохранённые образцы голосов: при расшифровке
-       новых записей Nestor подставляет эти имена автоматически. Голоса хранятся
-       только на этом компьютере.</p>
+    <h1>Люди</h1>
+    <p class="sub" style="text-align:left">Каждый человек — одно имя (и, может быть, несколько
+       написаний) и один или несколько голосов. При расшифровке новых записей Nestor
+       подставляет имя человека автоматически; переименование меняет имя во всех записях,
+       где оно было поставлено по голосу. Всё хранится только на этом компьютере.</p>
     <div class="vp-actions">
-      <button class="btn" id="vp-export" data-tip="Сохранить все голоса одним файлом — чтобы перенести их на другой компьютер или поделиться">Экспорт всех…</button>
-      <button class="btn" id="vp-export-selected" data-tip="Сохранить только отмеченные голоса — файл можно передать другому человеку, он импортирует его кнопкой «Импорт из файла…»" disabled>Экспорт выбранных (0)…</button>
-      <button class="btn" id="vp-import" data-tip="Добавить голоса из файла, выгруженного с другого компьютера">Импорт из файла…</button>
+      <button class="btn" id="vp-export" data-tip="Сохранить всех людей и их голоса одним файлом — чтобы перенести на другой компьютер или поделиться">Экспорт всех…</button>
+      <button class="btn" id="vp-import" data-tip="Добавить людей из файла, выгруженного с другого компьютера">Импорт из файла…</button>
     </div>
     <div class="vp-list">${
-      rows || '<div class="vp-empty">Пока ни одного голоса. Откройте запись, наведите на ярлык спикера и нажмите 🎙.</div>'
+      rows || '<div class="vp-empty">Пока никого. Откройте запись, введите имя спикера на ярлыке и нажмите 🎙 — человек появится здесь.</div>'
     }</div>
     <h2 style="margin-top:18px">Точность узнавания</h2>
     <label class="field">
@@ -5791,24 +6278,6 @@ function wireVoicesPanel() {
   const vpImport = document.getElementById('vp-import');
   if (vpImport) vpImport.onclick = () => importVoices();
 
-  // "Export selected": enabled while at least one checkbox is ticked
-  const vpExportSel = document.getElementById('vp-export-selected');
-  if (vpExportSel) {
-    const syncSelected = () => {
-      const picked = document.querySelectorAll('.vp-row .vp-check:checked').length;
-      vpExportSel.disabled = !picked;
-      vpExportSel.textContent = `Экспорт выбранных (${picked})…`;
-    };
-    vpExportSel.onclick = () => {
-      const picked = [...document.querySelectorAll('.vp-row .vp-check:checked')]
-        .map(cb => cb.closest('.vp-row').dataset.slug);
-      if (picked.length) exportVoices(picked);
-    };
-    document.querySelectorAll('.vp-row .vp-check').forEach(cb => {
-      cb.onclick = syncSelected;
-    });
-  }
-
   // threshold pills are rendered inside the panel: attach the handlers now
   for (const [elId] of VP_SETTING_CONTROLS) {
     const el = $(elId);
@@ -5818,34 +6287,86 @@ function wireVoicesPanel() {
   }
   if (document.getElementById('vp-threshold-pills')) applySettingsToControls();
 
+  document.querySelectorAll('.vp-row .vp-rename').forEach((button) => {
+    button.onclick = () => {
+      const row = button.closest('.vp-row');
+      const person = personById(row.dataset.id);
+      if (person) showPersonRename(person);
+    };
+  });
+
   document.querySelectorAll('.vp-row .vp-note').forEach((button) => {
     button.onclick = () => {
       const row = button.closest('.vp-row');
-      const slug = row.dataset.slug;
-      const vp = state.voiceprints.find(v => v.slug === slug);
-      showVoiceCommentEditor(vp);
+      const person = personById(row.dataset.id);
+      if (person) showPersonCommentEditor(person);
     };
   });
+
+  document.querySelectorAll('.vp-row .vp-merge').forEach((button) => {
+    button.onclick = () => {
+      const row = button.closest('.vp-row');
+      const person = personById(row.dataset.id);
+      if (person) showPersonMerge(person);
+    };
+  });
+
   document.querySelectorAll('.vp-row .vp-del').forEach((button) => {
     button.onclick = async () => {
       const row = button.closest('.vp-row');
-      const slug = row.dataset.slug;
       const name = row.querySelector('.vp-name').textContent;
-      if (!(await showConfirm(`Удалить голос «${name}» из библиотеки?`, { confirmText: 'Удалить' }))) return;
-      const res = await fetch('/api/voiceprints/' + encodeURIComponent(slug), { method: 'DELETE' });
-      if (res.ok) { toast('Голос удалён'); await loadVoiceprints(); showModal(renderVoicesPanel()); wireVoicesPanel(); }
-      else toast('Не удалось удалить голос');
+      if (!(await showConfirm(`Удалить «${name}» и все его голоса из библиотеки?`, { confirmText: 'Удалить' }))) return;
+      const res = await fetch('/api/people/' + encodeURIComponent(row.dataset.id), { method: 'DELETE' });
+      if (res.ok) { toast('Человек удалён'); await loadVoiceprints(); showModal(renderVoicesPanel()); wireVoicesPanel(); }
+      else toast('Не удалось удалить');
     };
   });
 }
 
-/* Editable note (comment) of one voiceprint: a small editor inside the panel. */
-function showVoiceCommentEditor(vp) {
+function personById(id) {
+  return (state.people || []).find((p) => p.id === id) || null;
+}
+
+/* Rename a person everywhere: their spellings, every recording, and the
+   matching entries that came from their voices. */
+function showPersonRename(person) {
   showModal(`
-    <h1>Заметка: ${escapeHtml(vp.name)}</h1>
+    <h1>Переименовать</h1>
+    <p class="sub" style="text-align:left">Имя «${escapeHtml(person.name)}» будет заменено
+       во всех записях и в сохранённых голосах. Прежнее написание останется вариантом.</p>
+    <input type="text" id="person-name-input" value="${escapeHtml(person.name)}" maxlength="80" style="width:100%">
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+      <button class="btn" id="person-name-cancel">Отмена</button>
+      <button class="btn accent" id="person-name-save">Переименовать</button>
+    </div>`);
+  const input = $('person-name-input');
+  input.focus(); input.select();
+  $('person-name-cancel').onclick = () => { showModal(renderVoicesPanel()); wireVoicesPanel(); };
+  const save = async () => {
+    const name = input.value.trim();
+    if (!name || name === person.name) { showModal(renderVoicesPanel()); wireVoicesPanel(); return; }
+    const res = await fetch('/api/people/' + encodeURIComponent(person.id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Не удалось переименовать: ' + (data.detail || res.status)); return; }
+    await loadVoiceprints();
+    showModal(renderVoicesPanel()); wireVoicesPanel();
+    toast(`Переименовано · записей: ${data.changed ?? 0}`);
+  };
+  $('person-name-save').onclick = save;
+  input.onkeydown = (e) => { if (e.key === 'Enter') save(); };
+}
+
+/* Note about a person. */
+function showPersonCommentEditor(person) {
+  showModal(`
+    <h1>Заметка: ${escapeHtml(person.name)}</h1>
     <p class="sub" style="text-align:left">Пара слов про человека — например, откуда он
-       знакомо или как различить с однофамильцем. Видна только здесь.</p>
-    <textarea id="vp-comment-input" maxlength="500" rows="4" style="width:100%; margin:8px 0 14px">${escapeHtml(vp.comment || '')}</textarea>
+       знаком или как различить с однофамильцем. Видна только здесь.</p>
+    <textarea id="vp-comment-input" maxlength="500" rows="4" style="width:100%; margin:8px 0 14px">${escapeHtml(person.comment || '')}</textarea>
     <div style="display:flex; gap:10px; justify-content:flex-end">
       <button class="btn" id="vp-comment-cancel">Отмена</button>
       <button class="btn accent" id="vp-comment-save">Сохранить</button>
@@ -5854,16 +6375,47 @@ function showVoiceCommentEditor(vp) {
   $('vp-comment-cancel').onclick = () => { showModal(renderVoicesPanel()); wireVoicesPanel(); };
   $('vp-comment-save').onclick = async () => {
     const comment = $('vp-comment-input').value.trim();
-    const res = await fetch('/api/voiceprints/' + encodeURIComponent(vp.slug), {
+    const res = await fetch('/api/people/' + encodeURIComponent(person.id), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comment }),
     });
     if (!res.ok) { toast('Не удалось сохранить заметку'); return; }
-    const local = state.voiceprints.find(v => v.slug === vp.slug);
-    if (local) local.comment = comment;
+    await loadVoiceprints();
     showModal(renderVoicesPanel()); wireVoicesPanel();
     toast(comment ? 'Заметка сохранена' : 'Заметка удалена');
+  };
+}
+
+/* Merge one person into another: names and voices come together. */
+function showPersonMerge(person) {
+  const others = (state.people || []).filter((p) => p.id !== person.id);
+  if (!others.length) { toast('Больше никого нет — склеивать не с кем'); return; }
+  const options = others.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  showModal(`
+    <h1>Склеить людей</h1>
+    <p class="sub" style="text-align:left">«${escapeHtml(person.name)}» и выбранный человек
+       станут одним: имена объединятся как варианты, голоса сложатся в один портрет.</p>
+    <label class="field"><span>С кем склеить</span>
+      <select id="person-merge-target" style="width:100%">${options}</select>
+    </label>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+      <button class="btn" id="person-merge-cancel">Отмена</button>
+      <button class="btn accent" id="person-merge-save">Склеить</button>
+    </div>`);
+  $('person-merge-cancel').onclick = () => { showModal(renderVoicesPanel()); wireVoicesPanel(); };
+  $('person-merge-save').onclick = async () => {
+    const target = $('person-merge-target').value;
+    const res = await fetch('/api/people/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: person.id, target }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Не удалось склеить: ' + (data.detail || res.status)); return; }
+    await loadVoiceprints();
+    showModal(renderVoicesPanel()); wireVoicesPanel();
+    toast(`Склеено · записей: ${data.changed ?? 0}`);
   };
 }
 

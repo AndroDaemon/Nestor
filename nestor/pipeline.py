@@ -498,9 +498,9 @@ def process_file(
                 )
             if match_enabled and clusters:
                 stage("voiceprints", 0.96)
-                from .voiceprints import VoiceprintLibrary
+                from .people import PeopleLibrary
 
-                library = VoiceprintLibrary(config.vp_library_root)
+                library = PeopleLibrary(config.vp_library_root)
                 thresholds = speaker_match.MatchThresholds(
                     abs_threshold=config.vp_abs_threshold,
                     margin=config.vp_margin,

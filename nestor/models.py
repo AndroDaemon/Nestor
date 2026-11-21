@@ -41,6 +41,19 @@ GIGAAM_PUNCT_URL = (
 )
 GIGAAM_PUNCT_FILES = ("encoder.int8.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
 
+# Text in video frames: the participant names burnt into a conference recording.
+# Both models are published by PaddlePaddle under Apache-2.0.  The PP-OCRv5
+# mobile detector is script-agnostic; the cyrillic recognizer covers Cyrillic
+# and Latin, which is what the name plates use.
+OCR_DIR = "pp-ocr-v5"
+OCR_REPO = "https://huggingface.co/PaddlePaddle/"
+OCR_SOURCES = {
+    "det.onnx": OCR_REPO + "PP-OCRv5_mobile_det_onnx/resolve/main/inference.onnx",
+    "rec.onnx": OCR_REPO + "cyrillic_PP-OCRv5_mobile_rec_onnx/resolve/main/inference.onnx",
+    "rec.yml": OCR_REPO + "cyrillic_PP-OCRv5_mobile_rec_onnx/resolve/main/inference.yml",
+}
+OCR_FILES = tuple(OCR_SOURCES)
+
 
 def bundled_models_dir() -> Optional[Path]:
     """Folder with the models shipped next to the executable, if any."""
@@ -118,6 +131,22 @@ def has_gigaam_punct(root: Optional[Path] = None) -> bool:
     return local_gigaam_punct(root) is not None
 
 
+def local_ocr_models(root: Optional[Path] = None) -> Optional[Dict[str, Path]]:
+    """Paths of the OCR models used to read names off video frames."""
+    roots = [Path(root)] if root else [model_root(), download_root()]
+    for candidate_root in roots:
+        directory = candidate_root / OCR_DIR
+        files = {name: directory / name for name in OCR_FILES}
+        if all(path.exists() for path in files.values()):
+            return {"det": files["det.onnx"], "rec": files["rec.onnx"], "yaml": files["rec.yml"]}
+    return None
+
+
+def has_ocr(root: Optional[Path] = None) -> bool:
+    """Whether the OCR stack is ready to read names from video."""
+    return local_ocr_models(root) is not None
+
+
 def ensure_gigaam_punct(root: Optional[Path] = None, force: bool = False) -> Dict[str, Path]:
     """Download the punctuated ONNX model if needed and return its file paths."""
     existing = local_gigaam_punct(root)
@@ -146,6 +175,29 @@ def _download(url: str, target: Path) -> None:
     print(f"Downloading {url} ...", flush=True)
     with urllib.request.urlopen(url) as response, target.open("wb") as out:
         shutil.copyfileobj(response, out)
+
+
+def ensure_ocr_models(root: Optional[Path] = None, force: bool = False) -> Dict[str, Path]:
+    """Download the OCR models if needed and return the paths for ``OcrEngine``."""
+    existing = local_ocr_models(root)
+    if existing and not force:
+        return existing
+
+    root = Path(root) if root else download_root()
+    directory = root / OCR_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, url in OCR_SOURCES.items():
+        target = directory / name
+        if force or not target.exists():
+            _download(url, target)
+
+    models = local_ocr_models(root)
+    if models is None:
+        raise FileNotFoundError(
+            f"Could not prepare the OCR models in {directory}. "
+            "Check the network connection and try again."
+        )
+    return models
 
 
 def ensure_local_diarization(root: Optional[Path] = None, force: bool = False) -> Dict[str, Path]:

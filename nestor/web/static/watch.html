@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экран докладчика — Nestor</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --fg: #e8edf5;
+    --muted: #93a0b4;
+    --accent: #ff3495;
+    --panel: rgba(12, 16, 22, .78);
+    --btn: rgba(22, 22, 22, .82);
+    --line-2: rgba(255, 255, 255, .16);
+    --sub-size: 28px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0d0f12; color: var(--fg);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    user-select: none;
+  }
+  #stage { position: fixed; inset: 0; background: #000; }
+  #video {
+    width: 100%; height: 100%; display: block;
+    object-fit: contain; background: #000;
+  }
+  #stage.no-video #video { display: none; }
+
+  #waiting {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    text-align: center; padding: 24px;
+    background: radial-gradient(circle at 50% 40%, #151b24, #0d0f12 70%);
+    transition: opacity .25s ease;
+  }
+  #waiting.hidden { opacity: 0; pointer-events: none; }
+  #waiting .logo { font-size: 13px; letter-spacing: .35em; color: var(--muted); }
+  #waiting .line { font-size: 17px; }
+  #waiting .hint { font-size: 13px; color: var(--muted); max-width: 520px; line-height: 1.5; }
+
+  .subs {
+    position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%);
+    max-width: min(1180px, 93vw); padding: 10px 20px 13px;
+    border-radius: 12px; background: var(--panel);
+    backdrop-filter: blur(7px);
+    text-align: center; pointer-events: none;
+    transition: opacity .18s ease;
+  }
+  .subs.hidden { opacity: 0; }
+  .subs .name {
+    font-size: calc(var(--sub-size) * .58); font-weight: 600;
+    letter-spacing: .02em; margin-bottom: 3px;
+  }
+  .subs .text {
+    font-size: var(--sub-size); line-height: 1.3;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .85);
+    white-space: pre-wrap;
+  }
+
+  .controls {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px 16px 14px;
+    background: linear-gradient(to top, rgba(5, 7, 10, .94), rgba(5, 7, 10, .55) 55%, transparent);
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  body.idle .controls { opacity: 0; transform: translateY(12px); pointer-events: none; }
+  body.idle { cursor: none; }
+
+  button, select {
+    font: inherit; color: var(--fg); background: var(--btn);
+    border: 1px solid var(--line-2); border-radius: 8px;
+    height: 34px; padding: 0 11px; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  button:hover, select:hover { background: rgba(38, 38, 38, .94); border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  button[hidden] { display: none; }
+  #btn-play { width: 46px; font-size: 15px; }
+  .spacer { flex: 1; }
+  .clock { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); padding: 0 6px; min-width: 96px; text-align: center; }
+  #stage { cursor: pointer; }
+  body.idle #stage { cursor: none; }
+
+  @media (max-width: 720px) {
+    .controls { flex-wrap: wrap; }
+    .clock { min-width: 0; }
+    .subs { bottom: 118px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage" class="no-video">
+  <video id="video" muted playsinline preload="auto"></video>
+
+  <div id="waiting">
+    <div class="logo">NESTOR</div>
+    <div class="line" id="waiting-line">Ждём главное окно…</div>
+    <div class="hint" id="waiting-hint">Откройте запись в главном окне Nestor — картинка и субтитры появятся здесь сами.</div>
+  </div>
+
+  <div class="subs hidden" id="subs">
+    <div class="name" id="sub-name"></div>
+    <div class="text" id="sub-text"></div>
+  </div>
+
+  <div class="controls" id="controls">
+    <button id="btn-play" title="Пауза / продолжить (пробел)">▶</button>
+    <button id="btn-back" title="Назад на 5 секунд (←)">−5 с</button>
+    <button id="btn-fwd" title="Вперёд на 5 секунд (→)">+5 с</button>
+    <span class="clock" id="clock">0:00 / 0:00</span>
+    <span class="spacer"></span>
+    <select id="rate" title="Скорость воспроизведения" aria-label="Скорость воспроизведения">
+      <option value="0.5">0,5×</option>
+      <option value="0.75">0,75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1,25×</option>
+      <option value="1.5">1,5×</option>
+      <option value="2">2×</option>
+    </select>
+    <button id="btn-subs" class="active" title="Субтитры (S)">Субтитры</button>
+    <select id="sub-size" title="Размер субтитров" aria-label="Размер субтитров">
+      <option value="20">Мелкий</option>
+      <option value="28" selected>Обычный</option>
+      <option value="38">Крупный</option>
+    </select>
+    <button id="btn-top" hidden title="Поверх всех окон">Поверх</button>
+    <button id="btn-full" title="Полный экран (F)">⛶</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var params = new URLSearchParams(location.search);
+  var recordId = params.get("id") || "";
+  var ACCESS_TOKEN = params.get("token") || "";
+  if (ACCESS_TOKEN) {
+    try { sessionStorage.setItem("nestor-token", ACCESS_TOKEN); } catch (err) {}
+  } else {
+    try { ACCESS_TOKEN = sessionStorage.getItem("nestor-token") || ""; } catch (err) {}
+  }
+  if (params.has("token")) {
+    params.delete("token");
+    var rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? "?" + rest : ""));
+  }
+
+  function withToken(url) {
+    if (!ACCESS_TOKEN) return url;
+    return url + (url.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(ACCESS_TOKEN);
+  }
+  function authHeaders() {
+    return ACCESS_TOKEN ? { "X-Nestor-Token": ACCESS_TOKEN } : {};
+  }
+
+  var video = document.getElementById("video");
+  var stage = document.getElementById("stage");
+  var waiting = document.getElementById("waiting");
+  var waitingLine = document.getElementById("waiting-line");
+  var waitingHint = document.getElementById("waiting-hint");
+  var subs = document.getElementById("subs");
+  var subName = document.getElementById("sub-name");
+  var subText = document.getElementById("sub-text");
+  var clock = document.getElementById("clock");
+  var btnPlay = document.getElementById("btn-play");
+  var btnSubs = document.getElementById("btn-subs");
+  var rateSelect = document.getElementById("rate");
+  var sizeSelect = document.getElementById("sub-size");
+  var pinButton = document.getElementById("btn-top");
+  var fullButton = document.getElementById("btn-full");
+
+  var record = null;
+  var stateMsg = null;
+  var lastSegKey = null;
+  var recordLoading = null;
+  var loadSeq = 0;
+  var subsOn = localStorage.getItem("nestor.watch.subs") !== "0";
+  var pinned = false;
+  var idleTimer = null;
+  var helloTimer = null;
+  var gotState = false;
+
+  var size = localStorage.getItem("nestor.watch.size") || "28";
+  sizeSelect.value = size;
+  document.documentElement.style.setProperty("--sub-size", size + "px");
+
+  // --------------------------------------------------------------- subtitle
+  function fmt(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = sec % 60;
+    var mm = String(m).padStart(2, "0");
+    var ss = String(s).padStart(2, "0");
+    return h ? h + ":" + mm + ":" + ss : m + ":" + ss;
+  }
+
+  function updateClock(t, duration) {
+    clock.textContent = fmt(t) + " / " + fmt(duration);
+  }
+
+  function localSegment(t) {
+    if (!record || !record.segments) return null;
+    var best = null;
+    for (var i = 0; i < record.segments.length; i++) {
+      var seg = record.segments[i];
+      if (seg.start <= t + 0.05) best = seg; else break;
+    }
+    if (!best || t > best.end + 2.5) return null;
+    var name = (record.speaker_names && record.speaker_names[best.speaker]) || best.speaker;
+    return { id: best.id, text: best.text, name: name, color: "#9ecbff", start: best.start, end: best.end };
+  }
+
+  function showSegment(seg) {
+    if (!subsOn || !seg || !seg.text) {
+      subs.classList.add("hidden");
+      return;
+    }
+    var key = seg.id + "|" + (seg.name || "") + "|" + seg.text;
+    if (key !== lastSegKey) {
+      lastSegKey = key;
+      subName.textContent = seg.name || "";
+      subName.style.color = seg.color || "#9ecbff";
+      subText.textContent = seg.text;
+    }
+    subs.classList.remove("hidden");
+  }
+
+  // --------------------------------------------------------------- state sync
+  function applyState(msg) {
+    if (!msg || msg.kind !== "state") return;
+    stateMsg = msg;
+    gotState = true;
+    if (helloTimer) { clearInterval(helloTimer); helloTimer = null; }
+
+    // While the record is being fetched (or its metadata is loading) the old
+    // video is still in the element: remember the message and wait.
+    if (!record || record.id !== msg.rec) {
+      pendingApply = msg;
+      loadRecord(msg.rec);
+      return;
+    }
+    if (recordLoading === msg.rec || !record.loaded || record.has_video === false) {
+      pendingApply = msg;
+      return;
+    }
+    if (!Number.isFinite(video.duration) || video.readyState < 1) {
+      pendingApply = msg;
+      return;
+    }
+
+    var offset = Number(msg.offset || record.media_offset || 0);
+    var target = Math.max(0, Number(msg.t) || 0) + offset;
+
+    if (Math.abs(video.currentTime - target) > 0.25) {
+      try { video.currentTime = target; } catch (err) {}
+    }
+
+    var rate = Number(msg.rate) || 1;
+    if (Math.abs((video.playbackRate || 1) - rate) > 0.001) {
+      video.playbackRate = rate;
+    }
+    rateSelect.value = String(rate);
+
+    if (msg.playing && video.paused) {
+      video.play().catch(function () { /* autoplay may need a click */ });
+    } else if (!msg.playing && !video.paused) {
+      video.pause();
+    }
+    btnPlay.textContent = msg.playing ? "❚❚" : "▶";
+
+    showSegment(msg.seg || localSegment(Number(msg.t) || 0));
+    updateClock(msg.t, msg.duration);
+    hideWaiting();
+  }
+
+  var pendingApply = null;
+
+  function hideWaiting() {
+    waiting.classList.add("hidden");
+    stage.classList.remove("no-video");
+  }
+
+  function showWaiting(line, hint) {
+    waitingLine.textContent = line;
+    if (hint) waitingHint.textContent = hint;
+    waiting.classList.remove("hidden");
+    stage.classList.add("no-video");
+  }
+
+  function loadRecord(id) {
+    if (!id) return;
+    if (record && record.loaded && record.id === id) return;
+    if (recordLoading === id) return;
+    var seq = ++loadSeq;
+    recordLoading = id;
+    record = { id: id, segments: [], has_video: true };
+    fetch("/api/recordings/" + encodeURIComponent(id), { headers: authHeaders() })
+      .then(function (res) {
+        if (!res.ok) throw new Error("record " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (seq !== loadSeq) return;
+        if (!data || data.id !== id) return;
+        data.loaded = true;
+        record = data;
+        if (data.has_video === false) {
+          video.removeAttribute("src");
+          video.load();
+          pendingApply = null;
+          showWaiting("В этой записи нет видео", "Была загружена только звуковая дорожка.");
+          return;
+        }
+        video.src = withToken("/api/recordings/" + encodeURIComponent(id) + "/media?video=1");
+        video.load();
+        var title = data.title || data.filename || "Запись";
+        document.title = title + " — Экран докладчика";
+        hideWaiting();
+      })
+      .catch(function () {
+        if (seq !== loadSeq) return;
+        showWaiting("Запись не найдена", "Она могла быть удалена. Откройте другую запись в главном окне.");
+      })
+      .finally(function () {
+        if (seq === loadSeq) recordLoading = null;
+      });
+  }
+
+  video.addEventListener("loadedmetadata", function () {
+    if (pendingApply && record && pendingApply.rec === record.id) {
+      var msg = pendingApply;
+      pendingApply = null;
+      applyState(msg);
+    }
+  });
+  video.addEventListener("error", function () {
+    if (!video.getAttribute("src")) return;
+    showWaiting("Не удалось показать видео", "Формат записи не поддерживается встроенным плеером, но расшифровка и звук работают.");
+  });
+
+  // --------------------------------------------------------------- commands
+  var channel = null;
+  try {
+    channel = new BroadcastChannel("nestor-player");
+  } catch (err) {
+    channel = null;
+  }
+
+  function send(message) {
+    if (!channel) return;
+    try { channel.postMessage(message); } catch (err) {}
+  }
+  function command(cmd, extra) {
+    send(Object.assign({ kind: "cmd", cmd: cmd }, extra || {}));
+  }
+
+  if (channel) {
+    channel.onmessage = function (event) {
+      var msg = event.data || {};
+      if (msg.kind === "state") applyState(msg);
+      else if (msg.kind === "idle") {
+        video.pause();
+        showWaiting("Откройте запись в главном окне Nestor", "Картинка и субтитры появятся здесь сами.");
+      } else if (msg.kind === "bye") {
+        // главное окно ушло с записи или закрылось: второй экран не должен
+        // продолжать жить своей жизнью, но окно остаётся — ждём возвращения
+        video.pause();
+        stateMsg = null;
+        gotState = false;
+        record = null;
+        pendingApply = null;
+        lastSegKey = null;
+        subs.classList.add("hidden");
+        if (!helloTimer) {
+          helloTimer = setInterval(function () {
+            if (gotState) { clearInterval(helloTimer); helloTimer = null; return; }
+            send({ kind: "hello" });
+          }, 2500);
+        }
+        send({ kind: "hello" });
+        showWaiting("Главное окно закрыто", "Плеер продолжится, когда вы снова откроете Nestor.");
+      }
+    };
+  }
+
+  send({ kind: "hello" });
+  helloTimer = setInterval(function () {
+    if (gotState) { clearInterval(helloTimer); helloTimer = null; return; }
+    send({ kind: "hello" });
+  }, 2500);
+
+  // --------------------------------------------------------------- controls
+  function toggle() {
+    if (!stateMsg) return;
+    command("toggle");
+  }
+  function seekBy(delta) {
+    if (!stateMsg) return;
+    command("seek", { delta: delta });
+  }
+
+  btnPlay.addEventListener("click", toggle);
+  document.getElementById("btn-back").addEventListener("click", function () { seekBy(-5); });
+  document.getElementById("btn-fwd").addEventListener("click", function () { seekBy(5); });
+
+  rateSelect.addEventListener("change", function () {
+    var rate = Number(rateSelect.value) || 1;
+    command("rate", { rate: rate });
+  });
+
+  btnSubs.addEventListener("click", function () {
+    subsOn = !subsOn;
+    btnSubs.classList.toggle("active", subsOn);
+    try { localStorage.setItem("nestor.watch.subs", subsOn ? "1" : "0"); } catch (err) {}
+    if (!subsOn) subs.classList.add("hidden");
+    else if (stateMsg) showSegment(stateMsg.seg || localSegment(Number(stateMsg.t) || 0));
+  });
+  btnSubs.classList.toggle("active", subsOn);
+
+  sizeSelect.addEventListener("change", function () {
+    var value = sizeSelect.value || "28";
+    document.documentElement.style.setProperty("--sub-size", value + "px");
+    try { localStorage.setItem("nestor.watch.size", value); } catch (err) {}
+  });
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  function toggleFullscreen() {
+    var root = document.documentElement;
+    if (isFullscreen()) {
+      (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document);
+    } else {
+      (root.requestFullscreen || root.webkitRequestFullscreen || function () {}).call(root);
+    }
+  }
+  fullButton.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", function () {
+    fullButton.textContent = isFullscreen() ? "⤦" : "⛶";
+  });
+
+  function refreshPin() {
+    var api = window.pywebview && window.pywebview.api;
+    pinButton.hidden = !(api && api.set_watch_on_top);
+  }
+  window.addEventListener("pywebviewready", refreshPin);
+  refreshPin();
+
+  // the pinned flag lives here only; Python applies it through Win32, so
+  // window.on_top must not be read back as the source of truth.
+  try {
+    pinned = localStorage.getItem("nestor.watch.pinned") === "1";
+  } catch (err) {}
+  pinButton.classList.toggle("active", pinned);
+  pinButton.textContent = pinned ? "Поверх ✓" : "Поверх";
+  if (pinned) {
+    var api = window.pywebview && window.pywebview.api;
+    if (api && api.set_watch_on_top) {
+      Promise.resolve(api.set_watch_on_top(true)).catch(function () {});
+    }
+  }
+
+  pinButton.addEventListener("click", function () {
+    var api = window.pywebview && window.pywebview.api;
+    if (!api || !api.set_watch_on_top) return;
+    pinned = !pinned;
+    try {
+      localStorage.setItem("nestor.watch.pinned", pinned ? "1" : "0");
+    } catch (err) {}
+    pinButton.classList.toggle("active", pinned);
+    pinButton.textContent = pinned ? "Поверх ✓" : "Поверх";
+    Promise.resolve(api.set_watch_on_top(pinned)).catch(function () {
+      pinned = false;
+      try {
+        localStorage.setItem("nestor.watch.pinned", "0");
+      } catch (err) {}
+      pinButton.classList.remove("active");
+      pinButton.textContent = "Поверх";
+    });
+  });
+
+  stage.addEventListener("dblclick", toggleFullscreen);
+  stage.addEventListener("click", function () {
+    // Autoplay can be refused until the window gets a gesture.
+    if (stateMsg && stateMsg.playing && video.paused) {
+      video.play().catch(function () {});
+    }
+  });
+
+  // --------------------------------------------------------------- chrome
+  function wake() {
+    document.body.classList.remove("idle");
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+      if (!video.paused) document.body.classList.add("idle");
+    }, 2600);
+  }
+  ["mousemove", "mousedown", "keydown", "touchstart"].forEach(function (name) {
+    window.addEventListener(name, wake, { passive: true });
+  });
+  video.addEventListener("play", wake);
+  video.addEventListener("pause", function () {
+    document.body.classList.remove("idle");
+    if (idleTimer) clearTimeout(idleTimer);
+  });
+
+  window.addEventListener("keydown", function (event) {
+    if (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      toggle();
+    } else if (event.code === "ArrowLeft") {
+      event.preventDefault();
+      seekBy(-5);
+    } else if (event.code === "ArrowRight") {
+      event.preventDefault();
+      seekBy(5);
+    } else if (event.key === "f" || event.key === "F" || event.key === "а" || event.key === "А") {
+      event.preventDefault();
+      toggleFullscreen();
+    } else if (event.key === "s" || event.key === "S" || event.key === "ы" || event.key === "Ы") {
+      event.preventDefault();
+      btnSubs.click();
+    }
+  });
+
+  if (recordId) {
+    loadRecord(recordId);
+    // Ask the main window for the current position right away.
+    setTimeout(function () { send({ kind: "hello" }); }, 60);
+  }
+  wake();
+})();
+</script>
+</body>
+</html>

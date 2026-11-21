@@ -58,6 +58,22 @@ if punct_dir and punct_dir.exists():
 else:
     print("[spec] no gigaam-v3-punct models — the app will download them on first run")
 
+# OCR models for reading participant names off video frames: PP-OCRv5 detector
+# plus the Cyrillic recogniser, ~13 MB.  Optional — without them the app works
+# exactly as before, it just gets no name hints from the video.
+ocr_dir = local_models / "pp-ocr-v5" if local_models.exists() else None
+OCR_FILES = ("det.onnx", "rec.onnx", "rec.yml")
+if ocr_dir and ocr_dir.exists():
+    found = [name for name in OCR_FILES if (ocr_dir / name).exists()]
+    if len(found) == len(OCR_FILES):
+        for name in OCR_FILES:
+            datas.append((str(ocr_dir / name), "models/pp-ocr-v5"))
+        print("[spec] bundling pp-ocr-v5 models")
+    else:
+        print(f"[spec] pp-ocr-v5 incomplete ({len(found)}/3 files) — run: nestor models")
+else:
+    print("[spec] no pp-ocr-v5 models — names from video will be unavailable")
+
 # ------------------------------------------------------------------ hiddenimports
 hiddenimports = [
     "uvicorn.logging",

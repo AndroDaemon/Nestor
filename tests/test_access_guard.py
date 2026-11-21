@@ -45,7 +45,8 @@ def test_accepts_header_query_and_cookie(guarded):
     client, token = guarded
     assert client.get("/api/status", headers={"X-Nestor-Token": token}).status_code == 200
     assert client.get(f"/api/status?token={token}").status_code == 200
-    assert client.get("/api/status", cookies={"nestor_token": token}).status_code == 200
+    client.cookies.set("nestor_token", token)
+    assert client.get("/api/status").status_code == 200
 
 
 def test_guard_sets_httponly_cookie(guarded):

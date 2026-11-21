@@ -64,7 +64,9 @@ from ..library import Library, Recording, Segment
 from ..pipeline import JobCancelled, process_file
 from ..settings import SettingsStore
 from ..types import Turn
+from ..video_names import names_from_video, probe_video
 from ..voiceprints import VoiceprintLibrary
+from ..people import PeopleLibrary
 
 STATIC_DIR = Path(__file__).parent / "static"
 ALLOWED_SUFFIXES = {
@@ -88,6 +90,16 @@ MEDIA_TYPES = {
     ".aiff": "audio/aiff",
     ".aif": "audio/aiff",
     ".webm": "audio/webm",
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".3gp": "video/3gpp",
+}
+# Types for the picture element: a .webm served as audio/webm is rejected by
+# Chromium even when the file carries a video track.
+VIDEO_MEDIA_TYPES = {
+    ".webm": "video/webm",
     ".mp4": "video/mp4",
     ".mkv": "video/x-matroska",
     ".mov": "video/quicktime",
@@ -686,6 +698,17 @@ class Processor:
                 )
                 return
 
+            # Names burnt into the video frames (conference name plates). A few
+            # seconds of work that gives the user a ready roster when renaming
+            # speakers — it never guesses who said what.
+            try:
+                on_stage("names", 0.97)
+                recording.video_names = names_from_video(
+                    self.library.recording_source(recording)
+                )
+            except Exception as exc:  # noqa: BLE001 - a bonus, never a failure
+                self.library.log(f"names skipped for {recording.filename}: {exc}")
+
             recording.status = "done"
             recording.stage = "done"
             recording.progress = 1.0
@@ -916,7 +939,7 @@ class Processor:
             recording.speaker_match = {}
             try:
                 from .. import speaker_embed, speaker_match as sm
-                from ..voiceprints import VoiceprintLibrary
+                from ..people import PeopleLibrary
 
                 clusters, per_segment = speaker_embed.cluster_vectors(
                     waveform, SAMPLE_RATE, recording.segments,
@@ -988,7 +1011,7 @@ class Processor:
                     config.embedding_dir, recording.id, clusters, per_segment
                 )
                 if config.match_voiceprints and clusters:
-                    library = VoiceprintLibrary(config.vp_library_root)
+                    library = PeopleLibrary(config.vp_library_root)
                     matches = sm.match_clusters(
                         clusters, library,
                         thresholds=sm.MatchThresholds(
@@ -1842,6 +1865,7 @@ def create_app(
     lib = library or Library(work_dir)
     processor = Processor(lib, max_workers=max_workers)
     voices = VoiceprintLibrary(lib.root)
+    people = PeopleLibrary(lib.root, voices)
 
     if token:
         install_access_guard(app, token)
@@ -1849,6 +1873,7 @@ def create_app(
     app.state.library = lib
     app.state.processor = processor
     app.state.voiceprints = voices
+    app.state.people = people
     app.state.session_token = token or ""
     app.state.settings = SettingsStore(lib.root)
 
@@ -1863,9 +1888,31 @@ def create_app(
             lib.save(recording)
             lib.log(f"interrupted {recording.filename}: status reset on startup")
 
+    def ensure_video_probe(recording: Recording) -> None:
+        """Learn once whether the original has a picture and where its audio starts.
+
+        Opening the container costs a few milliseconds and the answer never
+        changes, so it is cached on the record.  A running job writes the record
+        itself; skip the save there and let the next view fill the fields in.
+        """
+        if recording.video_checked:
+            return
+        source = lib.recording_source(recording)
+        has_video, offset = probe_video(source) if source.exists() else (False, 0.0)
+        recording.has_video = has_video
+        recording.media_offset = offset
+        recording.video_checked = True
+        if recording.status not in ("queued", "running"):
+            lib.save(recording, create=False)
+
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/watch.html", response_class=HTMLResponse)
+    def watch_page() -> HTMLResponse:
+        """Presenter screen: a separate window with the picture and subtitles."""
+        return HTMLResponse((STATIC_DIR / "watch.html").read_text(encoding="utf-8"))
 
     @app.get("/api/status")
     def status() -> Dict[str, object]:
@@ -2172,6 +2219,7 @@ def create_app(
         recording = lib.load(record_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="Запись не найдена")
+        ensure_video_probe(recording)
         payload = recording.to_dict()
         if recording.status == "running":
             elapsed = processor.elapsed_sec(recording.id)
@@ -2379,14 +2427,23 @@ def create_app(
         return {"deleted": record_id}
 
     @app.get("/api/recordings/{record_id}/media")
-    def recording_media(record_id: str, request: Request) -> Response:
+    def recording_media(record_id: str, request: Request, video: int = 0) -> Response:
         recording = lib.load(record_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="Запись не найдена")
         source = lib.recording_source(recording)
         if not source.exists():
             raise HTTPException(status_code=404, detail="Файл записи не найден")
-        media_type = MEDIA_TYPES.get(source.suffix.lower(), "application/octet-stream")
+        suffix = source.suffix.lower()
+        media_type = MEDIA_TYPES.get(suffix, "application/octet-stream")
+        if video:
+            # The <video> element needs a video type even when the same file is
+            # normally served as audio: Chromium rejects audio/webm + picture.
+            ensure_video_probe(recording)
+            if recording.has_video:
+                media_type = VIDEO_MEDIA_TYPES.get(suffix, media_type)
+            else:
+                raise HTTPException(status_code=404, detail="В записи нет видео")
         return ranged_response(source, request, media_type)
 
     @app.get("/api/sample")
@@ -2587,10 +2644,14 @@ def create_app(
     def list_voiceprints() -> Dict[str, object]:
         items = []
         for meta in voices.list():
+            person = people.person_of_voice(meta.slug)
             items.append(
                 {
                     "slug": meta.slug,
-                    "name": meta.display_name,
+                    # the name shown everywhere is the person's, not the one the
+                    # voice was once saved under
+                    "name": person.display_name if person else meta.display_name,
+                    "person_id": person.id if person else "",
                     "comment": meta.comment,
                     "num_utterances": meta.num_utterances,
                     "total_duration_sec": round(meta.total_duration_sec, 1),
@@ -2684,7 +2745,17 @@ def create_app(
             f"voiceprint saved: {meta.display_name} "
             f"(from {recording.filename}, {speaker}{chosen})"
         )
-        return {"saved": meta.display_name, "slug": meta.slug}
+        # every voice belongs to a person — a brand-new voice gets one right
+        # away, so the library stays a list of people rather than of voices
+        person = people.person_of_voice(meta.slug)
+        if person is None:
+            person = people.create(name, [meta.slug])
+            lib.log(f"person added: {person.display_name} (from a saved voice)")
+        return {
+            "saved": person.display_name,
+            "slug": meta.slug,
+            "person_id": person.id,
+        }
 
     @app.delete("/api/voiceprints/{slug}")
     def delete_voiceprint(slug: str) -> Dict[str, object]:
@@ -2692,6 +2763,8 @@ def create_app(
         name = meta.display_name if meta else slug
         if not voices.delete(slug):
             raise HTTPException(status_code=404, detail="Голос не найден")
+        # the person who owned this voice may be left with nothing behind
+        people.reconcile()
         lib.log(f"voiceprint deleted: {name}")
         return {"deleted": slug}
 
@@ -2829,7 +2902,270 @@ def create_app(
             f"voiceprints imported: +{len(report['added'])} new, "
             f"~{len(report['merged'])} merged, {len(report['skipped'])} skipped"
         )
+        # Names may have arrived with the voices: rebuild the people layer so a
+        # person exists behind every voice.
+        people.reconcile()
         return report
+
+    # ----------------------------------------------------------------- people
+    # People sit on top of the voice library: one displayed name plus the
+    # spellings it is known by, and one or more voices behind it.  The voice
+    # routes above stay as they are - matching works on voices, and this layer
+    # only decides what the names look like.
+    def _person_payload(person) -> Dict[str, object]:
+        items = []
+        utterances = 0
+        total = 0.0
+        for slug in person.voices:
+            meta = people.voices.find_by_slug(slug)
+            if meta is None:
+                continue
+            items.append(
+                {
+                    "slug": meta.slug,
+                    "name": meta.display_name,
+                    "comment": meta.comment,
+                    "num_utterances": meta.num_utterances,
+                    "total_duration_sec": round(meta.total_duration_sec, 1),
+                }
+            )
+            utterances += meta.num_utterances
+            total += meta.total_duration_sec
+        return {
+            "id": person.id,
+            "name": person.display_name,
+            "aliases": list(person.aliases),
+            "voices": items,
+            "comment": person.comment,
+            "num_utterances": utterances,
+            "total_duration_sec": round(total, 1),
+            "created_at": person.created_at,
+            "updated_at": person.updated_at,
+        }
+
+    def _resolve_voice(value: object) -> str:
+        """A slug from either a slug or the name a voice is stored under."""
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        meta = people.voices.find_by_slug(text) or people.voices.find(text)
+        return meta.slug if meta is not None else ""
+
+    def _rename_in_recordings(spellings: List[str], new_name: str) -> int:
+        """Rewrite the recordings that were named by the voice library.
+
+        Only labels whose name came from voice matching are touched, so a name
+        typed by hand into a recording stays exactly as the user left it.
+        """
+        wanted = {name.casefold() for name in spellings if name}
+        if not wanted:
+            return 0
+        changed = 0
+        for recording in lib.list():
+            touched = False
+            for label, match in list((recording.speaker_match or {}).items()):
+                assigned = str((match or {}).get("assigned_name") or "")
+                if not assigned or assigned.casefold() not in wanted:
+                    continue
+                updated = dict(match)
+                updated["assigned_name"] = new_name
+                recording.speaker_match[label] = updated
+                if recording.speaker_names.get(label):
+                    recording.speaker_names[label] = new_name
+                touched = True
+            if not touched:
+                continue
+            try:
+                lib.save(recording, create=False)
+                changed += 1
+            except OSError:
+                pass
+        return changed
+
+    @app.get("/api/people")
+    def list_people() -> Dict[str, object]:
+        return {"people": [_person_payload(person) for person in people.list()]}
+
+    @app.get("/api/people/similar")
+    def similar_person(name: str = "") -> Dict[str, object]:
+        """Who a name read off the video probably belongs to, if anyone."""
+        found = people.similar_person(name.strip())
+        if found is None:
+            return {"person": None, "spelling": ""}
+        person, spelling = found
+        return {"person": _person_payload(person), "spelling": spelling}
+
+    @app.post("/api/people")
+    async def add_person(request: Request) -> Dict[str, object]:
+        """Create a person: a name, optionally with voices attached at once."""
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Укажите имя человека")
+        raw = body.get("voices")
+        slugs = [_resolve_voice(item) for item in raw] if isinstance(raw, (list, tuple)) else []
+        try:
+            person = people.create(name, [slug for slug in slugs if slug])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        lib.log(f"person added: {person.display_name}")
+        return _person_payload(person)
+
+    @app.patch("/api/people/{person_id}")
+    async def edit_person(person_id: str, request: Request) -> Dict[str, object]:
+        """Rename a person, pick which spelling is shown, or write a note.
+
+        ``name`` renames and carries the new name into the recordings the voice
+        library had named.  ``display`` only chooses among spellings already
+        known, so it never touches the recordings.
+        """
+        person = people.get(person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+
+        changed = 0
+        if "name" in body:
+            name = str(body.get("name") or "").strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Укажите имя человека")
+            spellings = person.spellings()
+            person = people.rename(person_id, name)
+            if person is None:
+                raise HTTPException(status_code=404, detail="Человек не найден")
+            changed = _rename_in_recordings(spellings, person.display_name)
+            lib.log(f"person renamed: {name} ({changed} recordings)")
+        if "display" in body:
+            display = str(body.get("display") or "").strip()
+            if display and people.set_display(person_id, display) is None:
+                raise HTTPException(status_code=400, detail="Такое написание не известно")
+            person = people.get(person_id)
+        if "comment" in body:
+            people.set_comment(person_id, str(body.get("comment") or "").strip())
+            person = people.get(person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        payload = _person_payload(person)
+        payload["changed"] = changed
+        return payload
+
+    @app.post("/api/people/{person_id}/aliases")
+    async def edit_person_aliases(person_id: str, request: Request) -> Dict[str, object]:
+        """Add another spelling of the name, or drop one."""
+        if people.get(person_id) is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        alias = str(body.get("alias") or "").strip()
+        if not alias:
+            raise HTTPException(status_code=400, detail="Пустое написание")
+        if body.get("remove"):
+            people.remove_alias(person_id, alias)
+        else:
+            people.add_alias(person_id, alias)
+        person = people.get(person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        return _person_payload(person)
+
+    @app.post("/api/people/{person_id}/voices")
+    async def edit_person_voices(person_id: str, request: Request) -> Dict[str, object]:
+        """Attach a voice to a person, detach one, or merge two of them.
+
+        ``merge`` folds the voice into the person's own portrait (the one story
+        per person the matcher wants); ``detach`` unhooks it again; otherwise
+        the voice is just attached.
+        """
+        person = people.get(person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        slug = _resolve_voice(body.get("voice"))
+        if not slug:
+            raise HTTPException(status_code=404, detail="Голос не найден")
+        if body.get("detach"):
+            people.detach_voice(person_id, slug)
+            # the freed voice belongs to somebody: reconcile gives it a person
+            # of its own again, so nothing is silently lost
+            people.reconcile()
+            person = people.get(person_id)
+            if person is None:
+                return {"id": person_id, "name": "", "aliases": [], "voices": [],
+                        "comment": "", "num_utterances": 0, "total_duration_sec": 0.0,
+                        "created_at": "", "updated_at": "", "gone": True}
+            return _person_payload(person)
+        if body.get("merge"):
+            source = people.voices.find_by_slug(slug)
+            target_slug = next(
+                (item for item in person.voices if item != slug), ""
+            )
+            target = people.voices.find_by_slug(target_slug) if target_slug else None
+            if source is None or target is None:
+                raise HTTPException(
+                    status_code=409, detail="Не с чем склеивать — у человека нет другого голоса"
+                )
+            people.voices.rename(source.display_name, target.display_name)
+            lib.log(f"voice merged: {source.display_name} -> {target.display_name}")
+            people.reconcile()
+        else:
+            if people.attach_voice(person_id, slug) is None:
+                raise HTTPException(status_code=404, detail="Человек не найден")
+            people.reconcile()
+            people.save()
+        person = people.get(person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        return _person_payload(person)
+
+    @app.post("/api/people/merge")
+    async def merge_people(request: Request) -> Dict[str, object]:
+        """Fold one person into another: spellings, voices and recording names."""
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        source = people.get(str(body.get("source") or "").strip())
+        target = people.get(str(body.get("target") or "").strip())
+        if source is None or target is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        if source.id == target.id:
+            raise HTTPException(status_code=400, detail="Это один и тот же человек")
+        spellings = source.spellings() + target.spellings()
+        merged = people.merge(source.id, target.id)
+        if merged is None:
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        changed = _rename_in_recordings(spellings, merged.display_name)
+        lib.log(
+            f"person merged: {source.display_name} -> {merged.display_name} "
+            f"({changed} recordings)"
+        )
+        payload = _person_payload(merged)
+        payload["changed"] = changed
+        return payload
+
+    @app.delete("/api/people/{person_id}")
+    def remove_person(person_id: str) -> Dict[str, object]:
+        """Forget a person together with the voices only they carried."""
+        if not people.delete(person_id):
+            raise HTTPException(status_code=404, detail="Человек не найден")
+        lib.log(f"person deleted: {person_id}")
+        return {"deleted": person_id}
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
