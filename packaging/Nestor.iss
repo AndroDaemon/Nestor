@@ -111,6 +111,7 @@ begin
         DeleteFile(DataDir + '\settings.json');
         DeleteFile(DataDir + '\hotwords.yaml');
         DeleteFile(DataDir + '\log.txt');
+        DeleteFile(DataDir + '\ui.log');
         DeleteFile(DataDir + '\instance.json');
       end;
     end;

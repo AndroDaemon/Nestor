@@ -67,6 +67,7 @@ from ..types import Turn
 from ..video_names import names_from_video, probe_video
 from ..voiceprints import VoiceprintLibrary
 from ..people import PeopleLibrary
+from ..organizer import ProjectLibrary
 
 STATIC_DIR = Path(__file__).parent / "static"
 ALLOWED_SUFFIXES = {
@@ -408,6 +409,15 @@ class Processor:
             return "running"
         return "none"
 
+    def active(self) -> List[str]:
+        """Ids of jobs this process still owns — queued or running.
+
+        Used by the desktop window to warn before closing while a job is
+        unfinished: the executor threads are not daemons, so the process stays
+        alive (without a window) until the job ends.
+        """
+        with self._lock:
+            return sorted(set(self._events) | set(self._futures) | set(self._started))
 
     def wait(self, record_id: str, timeout: float = 20.0) -> bool:
         """Block until the job has left the worker; true when it is safe."""
@@ -1866,6 +1876,7 @@ def create_app(
     processor = Processor(lib, max_workers=max_workers)
     voices = VoiceprintLibrary(lib.root)
     people = PeopleLibrary(lib.root, voices)
+    projects = ProjectLibrary(lib.root)
 
     if token:
         install_access_guard(app, token)
@@ -1874,6 +1885,7 @@ def create_app(
     app.state.processor = processor
     app.state.voiceprints = voices
     app.state.people = people
+    app.state.projects = projects
     app.state.session_token = token or ""
     app.state.settings = SettingsStore(lib.root)
 
@@ -1984,6 +1996,10 @@ def create_app(
                 "speakers": len(recording.speakers),
                 "segments": len(recording.segments),
                 "job_settings": recording.job_settings,
+                "project": recording.project,
+                "project_color": projects.color_for(recording.project),
+                "edited_at": recording.edited_at,
+                "done_at": recording.done_at,
             }
             if recording.status == "running":
                 # live seconds on the backend, not a client-side timer
@@ -2231,9 +2247,9 @@ def create_app(
     def patch_recording_meta(
         record_id: str, body: Dict = Body(...)
     ) -> Dict[str, object]:
-        """Rename (title alias) and notes for the records table.
+        """Title alias, notes, project and the review state of a recording.
 
-        Allowed while a job runs: title/notes do not touch segments, so a
+        Allowed while a job runs: none of these fields touch segments, so a
         concurrent save from the worker cannot clobber them."""
         recording = lib.load(record_id)
         if recording is None:
@@ -2247,11 +2263,29 @@ def create_app(
             fresh.title = title or None
         if "notes" in body:
             fresh.notes = notes or None
+        if "project" in body:
+            # empty string (or null) moves the recording out of any project
+            raw = body.get("project")
+            project_id = str(raw).strip() if raw else ""
+            if project_id and projects.get(project_id) is None:
+                raise HTTPException(status_code=404, detail="Проект не найден")
+            fresh.project = project_id or None
+        if "done" in body:
+            # the manual "finished" mark; "not finished" drops it entirely, so
+            # the state falls back to whether the transcript was ever edited
+            if body.get("done"):
+                fresh.done_at = fresh.done_at or _now_iso()
+            else:
+                fresh.done_at = None
         lib.save(fresh, create=False)
         return {
             "id": fresh.id,
             "title": fresh.title,
             "notes": fresh.notes,
+            "project": fresh.project,
+            "project_color": projects.color_for(fresh.project),
+            "edited_at": fresh.edited_at,
+            "done_at": fresh.done_at,
         }
 
     @app.put("/api/recordings/{record_id}")
@@ -2326,6 +2360,7 @@ def create_app(
 
         # create=False: if the record was deleted while the editor was typing,
         # do not recreate it from the client's stale copy
+        _mark_edited(recording, payload)
         lib.save(recording, create=False)
         return recording.to_dict()
 
@@ -2912,6 +2947,22 @@ def create_app(
     # spellings it is known by, and one or more voices behind it.  The voice
     # routes above stay as they are - matching works on voices, and this layer
     # only decides what the names look like.
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _mark_edited(recording: Recording, payload: Dict) -> None:
+        """Remember that the transcript was hand-edited.
+
+        A save carrying segments or speaker names is a real edit — the review
+        state becomes "editing".  An already-finished recording silently
+        returns to "editing", so marking it done is not a promise that can
+        never be broken.  Saves that only carry title/notes/keep do not count.
+        """
+        if "segments" not in payload and "speaker_names" not in payload:
+            return
+        recording.edited_at = _now_iso()
+        recording.done_at = None
+
     def _person_payload(person) -> Dict[str, object]:
         items = []
         utterances = 0
@@ -3166,6 +3217,85 @@ def create_app(
             raise HTTPException(status_code=404, detail="Человек не найден")
         lib.log(f"person deleted: {person_id}")
         return {"deleted": person_id}
+
+    # ------------------------------------------------------------- projects
+    def _project_payload(project) -> Dict[str, object]:
+        count = sum(1 for rec in lib.list() if rec.project == project.id)
+        return {
+            "id": project.id,
+            "name": project.name,
+            "color": project.color,
+            "count": count,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+        }
+
+    @app.get("/api/projects")
+    def list_projects() -> Dict[str, object]:
+        """All projects with how many recordings each one holds."""
+        return {"projects": [_project_payload(project) for project in projects.list()]}
+
+    @app.post("/api/projects")
+    async def add_project(request: Request) -> Dict[str, object]:
+        """Create a project (folder).  The same name returns the existing one."""
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Укажите название проекта")
+        try:
+            project = projects.create(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        lib.log(f"project created: {project.name}")
+        return _project_payload(project)
+
+    @app.patch("/api/projects/{project_id}")
+    async def edit_project(project_id: str, request: Request) -> Dict[str, object]:
+        """Rename a project or change its colour; recordings stay in it."""
+        if projects.get(project_id) is None:
+            raise HTTPException(status_code=404, detail="Проект не найден")
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Некорректный JSON: {exc}")
+        body: Dict[str, object] = body if isinstance(body, dict) else {}
+        project = projects.get(project_id)
+        if "name" in body:
+            name = str(body.get("name") or "").strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Укажите название проекта")
+            project = projects.rename(project_id, name)
+            lib.log(f"project renamed: {name}")
+        if "color" in body and project is not None:
+            project = projects.set_color(project_id, str(body.get("color") or ""))
+        if project is None:
+            raise HTTPException(status_code=404, detail="Проект не найден")
+        return _project_payload(project)
+
+    @app.delete("/api/projects/{project_id}")
+    def remove_project(project_id: str, move_to: str = "") -> Dict[str, object]:
+        """Delete a project.  Its recordings are unlinked (never deleted).
+
+        With ``move_to`` they are re-homed to another project instead of
+        landing in "uncategorized"."""
+        if projects.get(project_id) is None:
+            raise HTTPException(status_code=404, detail="Проект не найден")
+        target = str(move_to or "").strip()
+        if target and projects.get(target) is None:
+            raise HTTPException(status_code=404, detail="Проект для переноса не найден")
+        moved = 0
+        for recording in lib.list():
+            if recording.project == project_id:
+                recording.project = target or None
+                lib.save(recording, create=False)
+                moved += 1
+        projects.delete(project_id)
+        lib.log(f"project deleted: {project_id} ({moved} recordings moved)")
+        return {"deleted": project_id, "moved": moved}
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

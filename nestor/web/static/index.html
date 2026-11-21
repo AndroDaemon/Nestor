@@ -233,6 +233,56 @@
     cursor: pointer;
   }
   .job .job-details .diag-actions button:hover { border-color: var(--accent); }
+  /* ----------------------------------------- проекты и состояние разбора */
+  /* Секция проекта в рейле: заголовок со сворачиванием, как папка. Пустые
+     проекты не показываются; «Без проекта» — последняя секция. */
+  .rail-section { margin-bottom: 1px; }
+  .rail-section-head {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 5px 7px; border: 0; background: none; color: var(--muted);
+    font: inherit; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+    cursor: pointer; border-radius: 7px; text-align: left;
+  }
+  .rail-section-head:hover { background: var(--panel); color: var(--text); }
+  .rail-section-head .arrow {
+    flex: none; width: 9px; font-size: 9px; line-height: 1;
+    transition: transform .12s; color: var(--muted);
+  }
+  .rail-section.open .rail-section-head .arrow { transform: rotate(90deg); }
+  .rail-section-head .pdot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+  .rail-section-head .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-section-head .pcount { margin-left: auto; flex: none; font-size: 10px; color: var(--muted); }
+  .rail-section-body { display: none; }
+  .rail-section.open .rail-section-body { display: block; }
+  /* Маркер состояния разбора: квадратик в начале имени (форма отличается от
+     круглой точки статуса обработки). Он же — отметка «Завершено». */
+  .edot {
+    flex: none; width: 9px; height: 9px; padding: 0; border-radius: 3px;
+    border: 1px solid var(--line-2); background: #6f6f6f; cursor: pointer;
+    display: inline-block;
+  }
+  .edot.editing { background: var(--warn); border-color: var(--warn); }
+  .edot.done { background: var(--ok); border-color: var(--ok); }
+  .edot:hover { box-shadow: 0 0 0 3px rgba(255, 255, 255, .10); }
+  /* Цветной бейдж проекта (в шапке записи и в таблице) */
+  .proj-chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--text);
+    border-radius: 99px; padding: 2px 10px; font: inherit; font-size: 12px;
+  }
+  .proj-chip:hover { border-color: var(--accent); }
+  .proj-chip .pdot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+  /* Отметка «Завершено» в шапке записи */
+  .done-toggle {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--muted);
+    border-radius: 99px; padding: 2px 10px; font: inherit; font-size: 12px;
+  }
+  .done-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .done-toggle.on { border-color: var(--ok); color: var(--ok); }
+  .done-toggle .edot { width: 8px; height: 8px; cursor: inherit; pointer-events: none; }
+  /* Строка со сведениями проекта/состояния в шапке записи */
+  #rec-org { display: inline-flex; align-items: center; gap: 8px; }
   /* the run report, opened from that button: readable width in the modal */
   #report-body { max-width: 560px; text-align: left; }
   #report-body h1 { margin-bottom: 10px; }
@@ -459,27 +509,44 @@
   .gl-preview input:focus { outline: none; border-color: var(--accent); }
   .gl-preview .gl-preview-out { flex: 1 1 auto; margin-top: 0; min-width: 0; }
   .gl-preview-out mark { background: rgba(255,52,149,.2); color: var(--accent); border-radius: 4px; padding: 0 2px; }
-  /* попап переименования спикера у строки реплики */
+  /* попап переименования спикера у строки реплики. Фиксированная скромная
+     ширина: список имён из кадра читается сверху вниз, а не растягивается на
+     весь экран. Стиль — как у карточек в панели «Записи»: тёмная поверхность,
+     акцент только на кромке и при наведении. */
   #rename-pop {
-    position: fixed; z-index: 60; display: flex; gap: 6px; align-items: center;
-    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
-    padding: 8px 10px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    position: fixed; z-index: 60; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    width: 372px; max-width: calc(100vw - 24px);
+    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
+    padding: 9px 10px 10px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.4);
   }
-  #rename-pop input { width: 180px; }
+  #rename-pop input { flex: 1 1 auto; min-width: 0; width: auto; }
   #rename-pop button { padding: 2px 10px; }
-  /* имена, прочитанные с кадров записи: подсказки отдельной строкой под полем */
-  #rename-pop { flex-wrap: wrap; }
+  /* имена, прочитанные с кадров записи: аккуратный список под полем, при
+     10-12 участниках прокручивается, а не растягивает окно на весь экран */
   #rename-pop .rename-hints {
-    flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px;
-    max-height: 132px; overflow-y: auto; margin-top: 2px;
+    flex: 1 0 100%; display: grid; grid-template-columns: 1fr; gap: 2px;
+    max-height: 214px; overflow-y: auto; margin-top: 4px; padding: 6px;
+    border-radius: 9px; background: var(--panel); border: 1px solid var(--line-2);
   }
+  #rename-pop .rename-hints.from-library { border-color: rgba(0,191,255,.4); }
+  #rename-pop .rename-hints-title {
+    grid-column: 1; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); padding: 0 0 4px 3px;
+  }
+  #rename-pop .rename-hints.from-library .rename-hints-title { color: var(--accent-2); }
   #rename-pop .rename-hint {
-    padding: 2px 8px; font-size: 11px; border-radius: 999px; cursor: pointer;
-    background: var(--panel-2, rgba(255,255,255,.06));
-    border: 1px solid var(--line-2); color: var(--text);
-    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: block; width: 100%; text-align: left; padding: 5px 9px;
+    font-size: 12px; border-radius: 7px; cursor: pointer;
+    background: transparent; border: 1px solid transparent; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #rename-pop .rename-hint:hover { border-color: var(--accent); color: var(--accent); }
+  #rename-pop .rename-hint:hover {
+    background: var(--panel-2); border-color: var(--accent); color: var(--accent);
+  }
+  #rename-pop .rename-hints.from-library .rename-hint:hover {
+    border-color: var(--accent-2); color: var(--accent-2);
+  }
 
   /* sheet */
   /* Расшифровка занимает всё место между «Записями» и спикерами: у листа нет
@@ -507,6 +574,7 @@
   .sheet-title { font-size: 19px; font-weight: 600; word-break: break-word; cursor: text; border-radius: 6px; }
   .sheet-title:hover { background: var(--panel); box-shadow: -6px 0 0 var(--panel), 6px 0 0 var(--panel); }
   .sheet-sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .sheet-org { margin-top: 7px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   /* Итоговая строка под заголовком записи: сколько спикеров нашлось и что с
      этим можно сделать сразу, не разыскивая действия в меню по правому клику. */
   .result-bar {
@@ -533,12 +601,12 @@
     flex: 1 1 auto; min-width: 0; min-height: 0;
     overflow-y: auto; padding: 0 6px 22px 0;
   }
-  /* Видео рядом с расшифровкой: включается вручную и НЕ липкая — на
-     маленьких экранах панель уезжает при прокрутке, а не отнимает высоту
-     у текста. На больших экранах ею пользуются, на втором мониторе —
-     отдельным окном «Экран докладчика». */
+  /* Видео рядом с расшифровкой: включается вручную. Панель липкая — при
+     прокрутке текста она остаётся на виду сверху, а не уезжает вместе с
+     репликами. На втором мониторе удобнее отдельное окно «Экран докладчика». */
   .video-pane {
-    position: relative; margin: 4px 0 12px; background: #000;
+    position: sticky; top: 0; z-index: 30;
+    margin: 4px 0 12px; background: #000;
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   }
   .video-pane video {
@@ -977,6 +1045,7 @@
       </div>
       <div class="rail-tools">
         <button class="icon-btn" id="btn-rail-filter" data-tip="Показать только записи в работе и с ошибкой">⚑</button>
+        <button class="icon-btn" id="btn-new-project" data-tip="Создать проект">🗀</button>
         <button class="icon-btn" id="btn-home" data-tip="На главную (настройки, голоса)">⌂</button>
         <button class="icon-btn" id="btn-table" data-tip="Таблица записей">▤</button>
         <button class="icon-btn" id="btn-new" data-tip="Добавить файлы…">+</button>
@@ -1118,6 +1187,7 @@
           <div>
             <div class="sheet-title" id="rec-title"></div>
             <div class="sheet-sub" id="rec-sub"></div>
+            <div class="sheet-org" id="rec-org"></div>
           </div>
           <div class="save-state" id="save-state"></div>
         </div>
@@ -1156,6 +1226,8 @@
       </div>
       <div class="tv-bulk hidden" id="tv-bulk">
         <span class="count" id="tv-bulk-count"></span>
+        <button class="btn" id="tv-bulk-project">В проект…</button>
+        <button class="btn" id="tv-bulk-done">Отметить завершёнными</button>
         <button class="btn" id="tv-bulk-speak">Только спикеры</button>
         <button class="btn" id="tv-bulk-export">Экспорт…</button>
         <button class="btn danger" id="tv-bulk-delete">Удалить</button>
@@ -1198,6 +1270,8 @@
   <button id="ctx-open" class="hidden">Открыть</button>
   <button id="ctx-rename" class="hidden">Переименовать…</button>
   <button id="ctx-notes" class="hidden">Заметка…</button>
+  <button id="ctx-project" class="hidden">В проект…</button>
+  <button id="ctx-done" class="hidden">Отметить завершённой</button>
   <button id="ctx-process" class="hidden">Перерасшифровать (текст и спикеры)</button>
   <button id="ctx-transcribe" class="hidden">Перерасшифровать (без спикеров)</button>
   <button id="ctx-speakers" class="hidden">Только спикеры (текст сохранится)</button>
@@ -1289,6 +1363,8 @@ const state = {
   railSearchTimer: null,
   railKey: null,       // signature of the last rail render (skip rebuilds)
   railExpanded: new Set(), // rail record ids with the details block expanded
+  projects: [],        // проекты: [{id,name,color,count,...}]
+  railSections: {},    // id проекта ('' для «Без проекта») -> раскрыта ли секция
   modalReturnFocus: null,  // element to refocus when the dialog closes (see showModal)
 };
 
@@ -1670,6 +1746,160 @@ function renderJobDetails(box, rec) {
   }
 }
 
+/* --------------------------------------------- проекты и состояние разбора */
+/* Состояние разбора: none (не начато, как у «added»), editing (авто при правке
+   реплик/спикеров), done (отмечено вручную). Отдельно от status: status — про
+   обработку, это — про ручной разбор расшифровки. */
+function workState(rec) {
+  if (rec.done_at) return 'done';
+  if (rec.edited_at) return 'editing';
+  return 'none';
+}
+const WORK_STATE_LABEL = { none: 'Не начато', editing: 'В работе', done: 'Завершено' };
+
+function projectName(id) {
+  if (!id) return 'Без проекта';
+  const p = (state.projects || []).find(x => x.id === id);
+  return p ? p.name : 'Без проекта';
+}
+function projectColor(id, rec) {
+  if (rec && rec.project_color) return rec.project_color;
+  const p = (state.projects || []).find(x => x.id === id);
+  return p ? p.color : '';
+}
+
+/* Load the project registry once (and after every change). */
+async function loadProjects() {
+  try {
+    const data = await (await fetch('/api/projects')).json();
+    state.projects = data.projects || [];
+  } catch (err) { state.projects = []; }
+  return state.projects;
+}
+
+/* Раскрыта ли секция проекта: по умолчанию проекты свёрнуты, «Без проекта»
+   раскрыт. Пользовательский выбор живёт в state.railSections (ключ — id,
+   '' для «Без проекта»). */
+function railSectionOpen(key) {
+  if (key in state.railSections) return state.railSections[key];
+  return key === '';
+}
+
+/* Карточка записи в рейле. Вынесена из loadRail, чтобы строить секции. */
+function buildJobCard(rec) {
+  const card = document.createElement('div');
+  card.className = 'job' + (state.current && state.current.id === rec.id ? ' active' : '');
+  card.dataset.id = rec.id;
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
+  const dot = rec.status === 'done' ? 'done'
+    : (rec.status === 'error' ? 'error'
+      : (rec.status === 'cancelled' ? 'cancelled' : 'working'));
+  const meta = railMeta(rec);
+  const hint = railHint(rec);
+
+  card.innerHTML = `<div class="name">`
+    + `<button class="edot ${workState(rec)}" aria-label="Состояние разбора: `
+      + `${WORK_STATE_LABEL[workState(rec)]}"></button>`
+    + `<span class="dot ${dot}"></span><span class="nm"></span></div>
+    <div class="meta"><span class="m"></span></div>
+    <button class="job-expand" data-tip="Подробнее: имя файла, где лежит оригинал, длительность и скорость обработки" aria-label="Подробнее о записи">▸</button>
+    <button class="job-more" data-tip="Действия: выгрузить, переобработать, удалить" aria-label="Действия с записью">⋯</button>
+    <div class="job-details"></div>`;
+  card.querySelector('.name .nm').textContent = rec.filename;
+  card.querySelector('.m').textContent = meta;
+  card.classList.toggle('no-meta', !meta);
+  card.dataset.tip = hint.join('\n');
+  const edot = card.querySelector('.edot');
+  edot.dataset.tip = 'Состояние разбора: ' + WORK_STATE_LABEL[workState(rec)]
+    + '\nКлик — отметить завершённой / вернуть';
+  edot.onclick = (e) => {
+    e.stopPropagation();
+    toggleDone(rec, workState(rec) !== 'done');
+  };
+  renderJobDetails(card.querySelector('.job-details'), rec);
+  if (state.railExpanded.has(rec.id)) card.classList.add('expanded');
+
+  card.onclick = (e) => {
+    if (e.target.closest('.job-more') || e.target.closest('.edot')) return;
+    if (e.target.closest('.job-expand')) {
+      // the details block survives the 1.2 s poll rebuild via railExpanded
+      card.classList.toggle('expanded');
+      if (card.classList.contains('expanded')) state.railExpanded.add(rec.id);
+      else state.railExpanded.delete(rec.id);
+      return;
+    }
+    openRecording(rec.id);
+  };
+  card.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecording(rec.id); return; }
+    // Shift+F10 / ContextMenu key — the keyboard version of "right click"
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      const r = card.getBoundingClientRect();
+      showJobMenu(rec, r.left + 10, r.top + 26);
+    }
+  };
+  card.oncontextmenu = (e) => { e.preventDefault(); showJobMenu(rec, e.clientX, e.clientY); };
+
+  const more = card.querySelector('.job-more');
+  more.onclick = (e) => {
+    e.stopPropagation();
+    const r = more.getBoundingClientRect();
+    showJobMenu(rec, r.right, r.bottom + 4);
+  };
+  return card;
+}
+
+/* Заголовок-секция проекта со сворачиванием. */
+function buildRailSection(key, label, color, records) {
+  const wrap = document.createElement('div');
+  wrap.className = 'rail-section' + (railSectionOpen(key) ? ' open' : '');
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'rail-section-head';
+  head.innerHTML = `<span class="arrow">▸</span>`
+    + (color ? `<span class="pdot" style="background:${escapeHtml(color)}"></span>` : '')
+    + `<span class="pname"></span><span class="pcount">${records.length}</span>`;
+  head.querySelector('.pname').textContent = label;
+  head.title = label;
+  head.onclick = (e) => {
+    e.preventDefault();
+    wrap.classList.toggle('open');
+    state.railSections[key] = wrap.classList.contains('open');
+  };
+  const body = document.createElement('div');
+  body.className = 'rail-section-body';
+  for (const rec of records) body.appendChild(buildJobCard(rec));
+  wrap.appendChild(head);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+/* Group the shown records into sections: named projects first (alphabetical),
+   then any unknown project ids, then «Без проекта» last. */
+function renderRailSections(rail, shown) {
+  const byProject = new Map();
+  for (const rec of shown) {
+    const key = rec.project || '';
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key).push(rec);
+  }
+  const named = (state.projects || []).filter(p => byProject.has(p.id));
+  for (const p of named) {
+    rail.appendChild(buildRailSection(p.id, p.name, p.color, byProject.get(p.id)));
+  }
+  // records pointing at a project that no longer exists — show them plainly
+  for (const [key, records] of byProject) {
+    if (!key) continue;
+    if ((state.projects || []).some(p => p.id === key)) continue;
+    rail.appendChild(buildRailSection(key, projectName(key), '', records));
+  }
+  if (byProject.has('')) {
+    rail.appendChild(buildRailSection('', 'Без проекта', '', byProject.get('')));
+  }
+}
+
 async function loadRail() {
   const data = await (await fetch('/api/recordings')).json();
   state.recordings = data.recordings || [];
@@ -1690,10 +1920,12 @@ async function loadRail() {
   const signature = JSON.stringify([
     (state.current && state.current.id) || null,
     state.railFilter, state.railQuery,
+    state.projects.map(p => [p.id, p.name, p.color]),
     shown.map(rec => [
       rec.id, rec.filename, rec.status, rec.stage,
       rec.duration, rec.speakers, rec.segments, rec.model, rec.error,
       rec.processing_seconds, rec.rtf, rec.run_meta, rec.stage_seconds, rec.title, rec.notes,
+      rec.project, rec.project_color, rec.edited_at, rec.done_at,
     ]),
   ]);
   if (signature === state.railKey) {
@@ -1717,61 +1949,7 @@ async function loadRail() {
     renderTable();
   }
   rail.innerHTML = '';
-  for (const rec of shown) {
-    const card = document.createElement('div');
-    card.className = 'job' + (state.current && state.current.id === rec.id ? ' active' : '');
-    card.dataset.id = rec.id;
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    const dot = rec.status === 'done' ? 'done'
-      : (rec.status === 'error' ? 'error'
-        : (rec.status === 'cancelled' ? 'cancelled' : 'working'));
-    const meta = railMeta(rec);
-    const hint = railHint(rec);
-
-    card.innerHTML = `<div class="name"><span class="dot ${dot}"></span><span class="nm"></span></div>
-      <div class="meta"><span class="m"></span></div>
-      <button class="job-expand" data-tip="Подробнее: имя файла, где лежит оригинал, длительность и скорость обработки" aria-label="Подробнее о записи">▸</button>
-      <button class="job-more" data-tip="Действия: выгрузить, переобработать, удалить" aria-label="Действия с записью">⋯</button>
-      <div class="job-details"></div>`;
-    card.querySelector('.name .nm').textContent = rec.filename;
-    card.querySelector('.m').textContent = meta;
-    card.classList.toggle('no-meta', !meta);
-    card.dataset.tip = hint.join('\n');
-    renderJobDetails(card.querySelector('.job-details'), rec);
-    if (state.railExpanded.has(rec.id)) card.classList.add('expanded');
-
-    card.onclick = (e) => {
-      if (e.target.closest('.job-more')) return;
-      if (e.target.closest('.job-expand')) {
-        // the details block survives the 1.2 s poll rebuild via railExpanded
-        card.classList.toggle('expanded');
-        if (card.classList.contains('expanded')) state.railExpanded.add(rec.id);
-        else state.railExpanded.delete(rec.id);
-        return;
-      }
-      openRecording(rec.id);
-    };
-    card.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecording(rec.id); return; }
-      // Shift+F10 / ContextMenu key — the keyboard version of "right click"
-      if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-        e.preventDefault();
-        const r = card.getBoundingClientRect();
-        showJobMenu(rec, r.left + 10, r.top + 26);
-      }
-    };
-    card.oncontextmenu = (e) => { e.preventDefault(); showJobMenu(rec, e.clientX, e.clientY); };
-
-    const more = card.querySelector('.job-more');
-    more.onclick = (e) => {
-      e.stopPropagation();
-      const r = more.getBoundingClientRect();
-      showJobMenu(rec, r.right, r.bottom + 4);
-    };
-
-    rail.appendChild(card);
-  }
+  renderRailSections(rail, shown);
   if (!state.recordings.length) {
     rail.innerHTML = '<div class="empty" style="padding:20px 10px;font-size:13px">Пока пусто</div>';
   } else if (!shown.length) {
@@ -1793,6 +1971,12 @@ function showJobMenu(rec, x, y) {
   $('ctx-open').classList.toggle('hidden', !rec);
   $('ctx-rename').classList.toggle('hidden', !rec);
   $('ctx-notes').classList.toggle('hidden', !rec);
+  $('ctx-project').classList.toggle('hidden', !rec);
+  const ws = workState(rec);
+  const doneBtn = $('ctx-done');
+  doneBtn.classList.toggle('hidden', !rec);
+  doneBtn.textContent = ws === 'done' ? 'Вернуть в работу' : 'Отметить завершённой';
+  $('ctx-project').textContent = rec.project ? 'В проект… (сейчас: ' + projectName(rec.project) + ')' : 'В проект…';
   $('ctx-process').classList.toggle('hidden', !canStart);
   $('ctx-transcribe').classList.toggle('hidden', !canStart);
   $('ctx-speakers').classList.toggle('hidden', !(canStart && hasTranscript));
@@ -1985,6 +2169,22 @@ function renderTable() {
           toggleDetailsRow(rec);
         };
         td.appendChild(exp);
+        // маркер состояния разбора + цвет проекта в колонке имени
+        const edot = document.createElement('span');
+        edot.className = 'edot ' + workState(rec);
+        edot.title = 'Состояние разбора: ' + WORK_STATE_LABEL[workState(rec)];
+        edot.onclick = (e) => { e.stopPropagation(); toggleDone(rec, workState(rec) !== 'done'); };
+        edot.style.verticalAlign = 'middle';
+        edot.style.marginRight = '5px';
+        td.appendChild(edot);
+        if (rec.project) {
+          const pc = projectColor(rec.project, rec);
+          const pd = document.createElement('span');
+          pd.className = 'pdot';
+          pd.style.cssText = `display:inline-block;vertical-align:middle;width:8px;height:8px;border-radius:3px;margin-right:5px;background:${pc || 'transparent'}`;
+          pd.title = 'Проект: ' + projectName(rec.project);
+          td.appendChild(pd);
+        }
         if (rec.title) {
           const alias = document.createElement('div');
           alias.className = 'tv-alias';
@@ -2281,6 +2481,7 @@ async function openRecording(id) {
   const known = document.createElement('span');
   known.id = 'rec-known';
   sub.appendChild(known);
+  renderOrgBar();
 
   audio.src = withToken('/api/recordings/' + id + '/media');
   audio.load();
@@ -3044,7 +3245,11 @@ function showRenamePopup(who, label) {
   const hints = roster.filter((n) => n && !taken.has(n.trim().toLowerCase()));
   if (hints.length) {
     const box = document.createElement('div');
-    box.className = 'rename-hints';
+    box.className = 'rename-hints from-video';
+    const title = document.createElement('div');
+    title.className = 'rename-hints-title';
+    title.textContent = 'Имена из кадров записи';
+    box.appendChild(title);
     for (const name of hints) {
       const chip = document.createElement('button');
       chip.type = 'button';
@@ -3076,7 +3281,11 @@ function hintOnName(label, pop) {
       const known = data.person.name;
       if (known.trim().toLowerCase() === current.trim().toLowerCase()) return;
       const box = document.createElement('div');
-      box.className = 'rename-hints';
+      box.className = 'rename-hints from-library';
+      const title = document.createElement('div');
+      title.className = 'rename-hints-title';
+      title.textContent = 'Из сохранённых голосов';
+      box.appendChild(title);
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'rename-hint';
@@ -4303,6 +4512,11 @@ async function save() {
       return;
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    // Реплики/спикеры сохранены — сервер пометил запись правленной
+    // (edited_at) и снял «Завершено» (done_at). Подхватываем это сразу,
+    // иначе кружок разбора остаётся серым до следующего полного обновления.
+    const data = await res.json().catch(() => null);
+    applyWorkState(data);
     setSaveState('saved');
   } catch (err) {
     // Keep the edits dirty and retry shortly instead of silently losing them.
@@ -5643,6 +5857,48 @@ function bulkSelected() {
   const ids = state.tableSel;
   return (state.recordings || []).filter(rec => ids.has(rec.id));
 }
+$('tv-bulk-project').onclick = async () => {
+  const chosen = bulkSelected();
+  if (!chosen.length) { toast('Сначала выберите записи'); return; }
+  await loadProjects();
+  const rows = (state.projects || []).map(p =>
+    `<button class="btn" data-pid="${escapeHtml(p.id)}" style="display:flex;align-items:center;gap:8px;width:100%;justify-content:flex-start">`
+    + `<span class="pdot" style="width:9px;height:9px;border-radius:3px;background:${escapeHtml(p.color)}"></span>`
+    + `${escapeHtml(p.name)}<span style="margin-left:auto;color:var(--muted);font-size:12px">${p.count || 0}</span></button>`
+  ).join('');
+  showModal(`
+    <h3>В проект</h3>
+    <p class="hint">Выбранных записей: ${chosen.length}. Все перейдут в один проект.</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:12px 0">
+      <button class="btn" id="bp-none" style="justify-content:flex-start">Без проекта</button>
+      ${rows}
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="bp-cancel">Отмена</button>
+    </div>`);
+  const apply = async (pid) => {
+    let ok = 0;
+    for (const rec of chosen) {
+      if (await patchMeta(rec, { project: pid || '' })) ok++;
+    }
+    closeModal();
+    toast(`В проект: ${ok} из ${chosen.length}`);
+  };
+  $('bp-none').onclick = () => apply('');
+  for (const b of document.querySelectorAll('#modal-body [data-pid]')) b.onclick = () => apply(b.dataset.pid);
+  $('bp-cancel').onclick = closeModal;
+};
+$('tv-bulk-done').onclick = async () => {
+  const chosen = bulkSelected();
+  if (!chosen.length) { toast('Сначала выберите записи'); return; }
+  const allDone = chosen.every(rec => !!rec.done_at);
+  const target = !allDone;   // если хоть одна не завершена — отмечаем все; иначе снимаем
+  let ok = 0;
+  for (const rec of chosen) {
+    if (await patchMeta(rec, { done: target })) ok++;
+  }
+  toast(target ? `Отмечено завершёнными: ${ok}` : `Возвращено в работу: ${ok}`);
+};
 $('tv-bulk-clear').onclick = () => {
   state.tableSel.clear();
   renderTable();
@@ -5747,6 +6003,14 @@ async function patchMeta(rec, changes) {
     if (fresh) {
       if ('title' in changes) fresh.title = data.title ?? null;
       if ('notes' in changes) fresh.notes = data.notes ?? null;
+      if ('project' in changes) {
+        fresh.project = data.project ?? null;
+        fresh.project_color = data.project_color ?? '';
+      }
+      if ('done' in changes) {
+        fresh.done_at = data.done_at ?? null;
+        fresh.edited_at = data.edited_at ?? null;
+      }
     }
     // Если правится запись, открытая сейчас, заголовок в шапке должен
     // смениться сразу, а не после повторного открытия.
@@ -5757,6 +6021,16 @@ async function patchMeta(rec, changes) {
         $('rec-title').textContent = state.current.title || state.current.filename;
       }
       if ('notes' in changes) state.current.notes = cur.notes ?? null;
+      if ('project' in changes) {
+        state.current.project = cur.project ?? null;
+        state.current.project_color = cur.project_color ?? '';
+        renderOrgBar();
+      }
+      if ('done' in changes) {
+        state.current.done_at = cur.done_at ?? null;
+        state.current.edited_at = cur.edited_at ?? null;
+        renderOrgBar();
+      }
     }
     loadRail();
     return true;
@@ -5804,6 +6078,249 @@ $('ctx-notes').onclick = () => {
   hideJobMenu();
   editNotes(rec);
 };
+$('ctx-project').onclick = () => {
+  const rec = state.ctxRec;
+  hideJobMenu();
+  openProjectPicker(rec);
+};
+$('ctx-done').onclick = () => {
+  const rec = state.ctxRec;
+  hideJobMenu();
+  toggleDone(rec, workState(rec) !== 'done');
+};
+
+/* ------------------------------------------------------ projects: backend */
+async function apiProjects(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+  return data;
+}
+
+/* Отметить запись завершённой / вернуть в работу. */
+/* Применить свежие edited_at/done_at, вернувшиеся из PUT: сервер помечает
+   запись правленной при сохранении реплик/спикеров. Обновляем модель и
+   индикаторы на месте (карточка рейла, строка таблицы, шапка записи), чтобы
+   кружок разбора сменялся сразу, а не после следующего полного обновления. */
+function applyWorkState(data) {
+  if (!data || !data.id) return;
+  const hasEdited = Object.prototype.hasOwnProperty.call(data, 'edited_at');
+  const hasDone = Object.prototype.hasOwnProperty.call(data, 'done_at');
+  if (!hasEdited && !hasDone) return;
+  const rec = state.recordings.find(r => r.id === data.id);
+  if (rec) {
+    if (hasEdited) rec.edited_at = data.edited_at ?? null;
+    if (hasDone) rec.done_at = data.done_at ?? null;
+  }
+  if (state.current && state.current.id === data.id) {
+    if (hasEdited) state.current.edited_at = data.edited_at ?? null;
+    if (hasDone) state.current.done_at = data.done_at ?? null;
+    renderOrgBar();
+  }
+  const view = rec || state.current;
+  if (!view) return;
+  const ws = workState(view);
+  [...document.querySelectorAll('.job[data-id="' + view.id + '"] .edot')]
+    .forEach(el => { el.className = 'edot ' + ws; });
+  [...document.querySelectorAll('tr.tv-row[data-id="' + view.id + '"] .edot')]
+    .forEach(el => { el.className = 'edot ' + ws; });
+}
+
+async function toggleDone(rec, done) {
+  const r = state.recordings.find(x => x.id === rec.id) || rec;
+  if (r.done_at && done) return;       // уже завершено
+  if (!r.done_at && !done) return;     // уже не завершено
+  if (await patchMeta(rec, { done })) {
+    toast(done ? 'Отмечено завершённой' : 'Возвращено в работу');
+  }
+}
+
+/* Выбор проекта для записи: список существующих + «Без проекта» + создание. */
+async function openProjectPicker(rec) {
+  await loadProjects();
+  const rows = (state.projects || []).map(p =>
+    `<button class="btn" data-pid="${escapeHtml(p.id)}" style="display:flex;align-items:center;gap:8px;width:100%;justify-content:flex-start">`
+    + `<span class="pdot" style="width:9px;height:9px;border-radius:3px;background:${escapeHtml(p.color)}"></span>`
+    + `${escapeHtml(p.name)}<span style="margin-left:auto;color:var(--muted);font-size:12px">${p.count || 0}</span></button>`
+  ).join('');
+  showModal(`
+    <h3>Проект записи</h3>
+    <p class="hint">Проекты группируют записи по теме в панели слева. Одна запись — один проект.</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:12px 0">
+      <button class="btn" id="pj-none" style="justify-content:flex-start">Без проекта</button>
+      ${rows}
+    </div>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <button class="btn" id="pj-new">+ Новый проект…</button>
+      <span><button class="btn" id="pj-manage">Управление проектами…</button>
+      <button class="btn" id="pj-cancel">Отмена</button></span>
+    </div>`);
+  const apply = async (pid) => {
+    if (await patchMeta(rec, { project: pid || '' })) closeModal();
+  };
+  $('pj-none').onclick = () => apply('');
+  for (const b of document.querySelectorAll('#modal-body [data-pid]')) {
+    b.onclick = () => apply(b.dataset.pid);
+  }
+  $('pj-new').onclick = () => newProjectDialog(async (created) => {
+    if (created) await apply(created.id);
+  });
+  $('pj-manage').onclick = () => manageProjects();
+  $('pj-cancel').onclick = closeModal;
+}
+
+/* Диалог создания проекта; при успехе вызывает onCreated(project). */
+function newProjectDialog(onCreated) {
+  showModal(`
+    <h3>Новый проект</h3>
+    <p class="hint">Название темы, например «Босфор» или «Созвоны с клиентами». Цвет подберётся сам.</p>
+    <input id="np-name" type="text" placeholder="Название проекта" style="width:100%;margin-top:10px">
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn" id="np-cancel">Отмена</button>
+      <button class="btn primary" id="np-ok">Создать</button>
+    </div>`);
+  const input = $('np-name');
+  input.focus();
+  const submit = async () => {
+    const name = input.value.trim();
+    if (!name) { toast('Введите название'); return; }
+    try {
+      const created = await apiProjects('POST', '/api/projects', { name });
+      await loadProjects();
+      loadRail();
+      closeModal();
+      if (onCreated) onCreated(created);
+    } catch (err) {
+      toast('Не удалось создать: ' + err.message);
+    }
+  };
+  $('np-ok').onclick = submit;
+  $('np-cancel').onclick = closeModal;
+  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+}
+
+/* Управление проектами: переименование, цвет, удаление. */
+async function manageProjects() {
+  await loadProjects();
+  const rows = (state.projects || []).map(p => `
+    <div class="pj-row" data-pid="${escapeHtml(p.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
+      <span class="pdot" style="width:10px;height:10px;border-radius:3px;background:${escapeHtml(p.color)}"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name)}</span>
+      <span style="color:var(--muted);font-size:12px">${p.count || 0}</span>
+      <button class="btn" data-act="rename">Переименовать…</button>
+      <button class="btn danger" data-act="delete">Удалить</button>
+    </div>`).join('');
+  showModal(`
+    <h3>Управление проектами</h3>
+    <p class="hint">Переименование сохраняет записи в проекте. Удаление спросит, что делать с записями.</p>
+    <div style="margin:12px 0;max-height:46vh;overflow:auto">
+      ${rows || '<div style="color:var(--muted);padding:10px 0">Проектов пока нет</div>'}
+    </div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="pj-add">+ Новый проект…</button>
+      <button class="btn" id="pj-close">Закрыть</button>
+    </div>`);
+  $('pj-add').onclick = () => newProjectDialog(() => manageProjects());
+  $('pj-close').onclick = closeModal;
+  for (const row of document.querySelectorAll('#modal-body .pj-row')) {
+    const pid = row.dataset.pid;
+    const proj = state.projects.find(p => p.id === pid);
+    row.querySelector('[data-act="rename"]').onclick = () => renameProject(proj);
+    row.querySelector('[data-act="delete"]').onclick = () => deleteProject(proj);
+  }
+}
+function renameProject(proj) {
+  showModal(`
+    <h3>Переименовать проект</h3>
+    <input id="rp-name" type="text" value="${escapeHtml(proj.name)}" style="width:100%;margin-top:10px">
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn" id="rp-cancel">Отмена</button>
+      <button class="btn primary" id="rp-ok">Сохранить</button>
+    </div>`);
+  const input = $('rp-name');
+  input.focus(); input.select();
+  $('rp-ok').onclick = async () => {
+    const name = input.value.trim();
+    if (!name) { toast('Введите название'); return; }
+    try {
+      await apiProjects('PATCH', '/api/projects/' + encodeURIComponent(proj.id), { name });
+      await loadProjects();
+      loadRail();
+      manageProjects();
+    } catch (err) { toast('Не удалось переименовать: ' + err.message); }
+  };
+  $('rp-cancel').onclick = () => manageProjects();
+}
+function deleteProject(proj) {
+  showModal(`
+    <h3>Удалить проект</h3>
+    <p class="hint">Проект «${escapeHtml(proj.name)}» будет удалён. Что сделать с его записями?</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:12px 0">
+      <button class="btn" id="dp-none" style="justify-content:flex-start">Оставить записи «Без проекта»</button>
+      ${(state.projects || []).filter(p => p.id !== proj.id).map(p =>
+        `<button class="btn" data-move="${escapeHtml(p.id)}" style="justify-content:flex-start">Перенести в «${escapeHtml(p.name)}»</button>`
+      ).join('')}
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="dp-cancel">Отмена</button>
+    </div>`);
+  const del = async (moveTo) => {
+    try {
+      const q = moveTo ? ('?move_to=' + encodeURIComponent(moveTo)) : '';
+      const res = await apiProjects('DELETE', '/api/projects/' + encodeURIComponent(proj.id) + q);
+      const verb = moveTo ? `перенесено ${res.moved}` : `отвязано ${res.moved}`;
+      await loadProjects();
+      loadRail();
+      toast(`Проект удалён, ${verb}`);
+      manageProjects();
+    } catch (err) { toast('Не удалось удалить: ' + err.message); }
+  };
+  $('dp-none').onclick = () => del('');
+  for (const b of document.querySelectorAll('#modal-body [data-move]')) {
+    b.onclick = () => del(b.dataset.move);
+  }
+  $('dp-cancel').onclick = () => manageProjects();
+}
+
+/* Кнопка создания проекта в шапке рейла. */
+$('btn-new-project').onclick = () => newProjectDialog(() => {});
+
+/* Полоса проекта и состояния разбора в шапке открытой записи. */
+function renderOrgBar() {
+  const bar = $('rec-org');
+  if (!bar) return;
+  const rec = state.current;
+  bar.innerHTML = '';
+  if (!rec) return;
+  // проект
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'proj-chip';
+  const color = projectColor(rec.project, rec);
+  chip.innerHTML = (color ? `<span class="pdot" style="background:${escapeHtml(color)}"></span>` : '')
+    + '<span class="pname"></span>';
+  chip.querySelector('.pname').textContent = projectName(rec.project);
+  chip.dataset.tip = 'Проект записи — нажмите, чтобы сменить';
+  chip.onclick = () => openProjectPicker(rec);
+  bar.appendChild(chip);
+  // состояние разбора
+  const ws = workState(rec);
+  const done = document.createElement('button');
+  done.type = 'button';
+  done.className = 'done-toggle' + (ws === 'done' ? ' on' : '');
+  done.innerHTML = `<span class="edot ${ws}"></span><span></span>`;
+  done.querySelector('span:last-child').textContent =
+    ws === 'done' ? 'Завершено' : (ws === 'editing' ? 'В работе' : 'Не начато');
+  done.dataset.tip = ws === 'done'
+    ? 'Разбор завершён. Нажмите, чтобы вернуть в работу'
+    : 'Нажмите, чтобы отметить разбор завершённым';
+  done.onclick = () => toggleDone(rec, ws !== 'done');
+  bar.appendChild(done);
+}
 
 /* Stop a queued or running job. The backend either stops it immediately
    (still queued) or at its next checkpoint (between chunks) — in both cases
@@ -6002,13 +6519,31 @@ $('btn-help').onclick = () => {
       заменяется. Один раз сохранили — и Nestor узнаёт человека даже через
      неделю.</p>
   
+  <h2>Проекты и состояние разбора</h2>
+  <p><b>Проекты</b> группируют записи по теме — как папки, но одна запись лежит
+     ровно в одном проекте. В панели слева записи разложены по секциям проектов;
+     проекты свёрнуты, а «Без проекта» открыт. Секция сворачивается кликом по
+     заголовку; у каждого проекта свой цвет.</p>
+  <p>Назначить запись в проект можно из её меню «В проект…» (там же — «+ Новый
+     проект…»), из шапки открытой записи или массово в таблице. Новый проект
+     создаётся и кнопкой 🗀 в шапке панели. Управление проектами — оттуда же:
+     переименование сохраняет записи в проекте, а удаление спросит, оставить их
+     «Без проекта» или перенести в другой.</p>
+  <p><b>Состояние разбора</b> показывает, что уже сделано с расшифровкой, —
+     это отдельно от состояния обработки. Три значения: <b>Не начато</b> (серый),
+     <b>В работе</b> (янтарный, ставится сам при правке реплик или спикеров) и
+     <b>Завершено</b> (лаймовый, отмечаете вручную). Квадратик слева от имени
+     записи в панели — это и есть отметка: клик завершает разбор или возвращает
+     в работу. То же — пунктом в меню записи и кнопкой в шапке открытой записи.
+     Если правку внести в уже завершённую запись, она сама вернётся в «В работе».</p>
+  
   <h2>Видео и второй экран</h2>
   <p>У записей с картинкой в верхней панели появляются кнопки «Видео» и «Экран ▸».
      Это два взаимоисключающих режима: видео показывается либо панелью рядом с
      расшифровкой, либо отдельным окном — вместе они не открываются.</p>
   <p><b>Видео рядом с расшифровкой</b> («Видео») показывает панель над текстом.
-     Панель не закреплена: при прокрутке текста она уезжает вверх и не отнимает
-     высоту у расшифровки. Выбор запоминается. Для записей без картинки кнопок нет.</p>
+     Панель закреплена сверху: при прокрутке расшифровки видео остаётся на виду.
+     Включение запоминается. Для записей без картинки кнопок нет.</p>
   <p><b>Экран докладчика</b> («Экран ▸») открывает отдельное окно с крупным видео
      и субтитрами — удобно на втором мониторе или телевизоре. Нажатие кнопки всегда
      выводит это окно на передний план; повторное нажатие просто поднимает его.
@@ -6878,6 +7413,7 @@ async function boot() {
   loadVoiceprints();
   loadSettings();
   loadGlossary();
+  await loadProjects();
   await loadRail();
   // the window may have been reloaded while a job was still running
   if (state.recordings.some(isWorking)) watch();

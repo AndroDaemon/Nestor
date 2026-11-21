@@ -281,3 +281,31 @@ def test_set_watch_on_top_without_native_handle(monkeypatch):
     api.open_watch_window("rec-1")
 
     assert api.set_watch_on_top(True) is False
+
+
+def test_close_extra_windows_closes_the_presenter_screen(monkeypatch):
+    """Closing the main window must take the presenter screen down too.
+
+    pywebview only exits once the last window is gone, so a lingering video
+    window would keep the app alive without its main window.
+    """
+    fake = with_webview(monkeypatch, FakeWebview())
+    api = make_api()
+
+    assert api.close_extra_windows() is False      # nothing open yet
+
+    api.open_watch_window("rec-1")
+    window = fake.window or api._watch_window
+    window.events.shown.fire()
+
+    assert api.close_extra_windows() is True
+    assert window.destroyed == 1
+    assert api._watch_window is None
+
+
+def test_close_extra_windows_is_safe_without_any_window(monkeypatch):
+    with_webview(monkeypatch, FakeWebview())
+    api = make_api()
+
+    assert api.close_extra_windows() is False
+    assert api.watch_window_open() is False

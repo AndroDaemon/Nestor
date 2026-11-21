@@ -69,13 +69,16 @@ JS в `<script>`, без сборки и без фреймворков). CSS —
 | Заголовок | `.rail-head` | «Записи» (uppercase, 11px) и кнопка `#btn-rail-toggle` («/») — схлопнуть/развернуть |
 | Свернуть панель | `#btn-rail-toggle` (`.rail-toggle`) | «, `Ctrl+B`; класс `.rail.collapsed` (46px) скрывает заголовок-подпись, поиск, список и подвал, остаются одни кнопки; состояние — `localStorage['nestor.rail.collapsed']` |
 | Кнопка «новая» | `#btn-new` (`.icon-btn`) | «+», title «Добавить файлы…» |
+| Кнопка «создать проект» | `#btn-new-project` (`.icon-btn`) | «🗀», title «Создать проект»; модалка `newProjectDialog()` |
 | Фильтр «в работе» | `#btn-rail-filter` (`.icon-btn`, `.on` при активном) | «⚑», тултип «Показать только записи в работе и с ошибкой» |
 | Поиск по имени | `#rail-search` (`input.rail-search`) | placeholder «Фильтр по имени…», debounce 150 мс |
 | Подвал рейла | `.rail-foot` | кнопки-переходы `#btn-voices` («Люди»), `#btn-glossary` («Словарь терминов»), `#btn-help` (круг «?»), версия `#app-version` |
 | Кнопка помощи | `#btn-help` (`.help-btn`, круг «?») | над версией; модалка помощи (две части) |
 | Версия | `#app-version` (`.rail-foot`) | «Nestor 1.0.0», цвет #b9b9b9, 11px |
 | Список | `#rail` (`.rail-list`) | генерируется `loadRail()` |
+| Секция проекта | `.rail-section` (+ `.open`) → `.rail-section-head` (`.arrow`, `.pdot`, `.pname`, `.pcount`) + `.rail-section-body` | записи сгруппированы по проектам (`renderRailSections`); заголовок сворачивается кликом, состояние в `state.railSections` (по умолчанию проекты свёрнуты, «Без проекта» открыт) |
 | Карточка записи | `.job` (+ `.job.active`, `[data-id]`) | кнопка на всю ширину |
+| Состояние разбора | `.job .name > .edot` (+ `.editing`/`.done`) | квадратик слева: серый — «Не начато», янтарный — «В работе», лаймовый — «Завершено»; клик → `toggleDone()` |
 | Имя файла в карточке | `.job .name` | обрезка в одну строку |
 | Строка статуса | `.job .meta` → `.m` | только то, что требует действия: «ошибка · N%», «остановлено · N%», «не расшифрована», «стадия · N%»; у распознанных — пусто (`.job.no-meta`), остаётся лишь точка статуса. Процент показывается и у ошибки/остановки (сохраняется последняя доля) |
 | Подсказка карточки | `.job[data-tip]` | многострочный хинт (в тултипе): имя, дата создания, длительность, «N спикеров · N реплик», модель, «распознано за …»; у работающих ещё «осталось примерно …» (ETA); у остальных — статус, у ошибки — текст ошибки |
@@ -168,7 +171,7 @@ hover, фокус и прокрутка рейла.
 | — к спикеру… | `.tools button` (4-я) | «к спикеру…» → `showReassignPopup()`: перенос реплики к другому спикеру / новому |
 | Панель выделения | `#sel-bar` (`.sel-bar`) | видна при непустом `state.segSel`: «Выделено: N реплик» + кнопки «Выделить в нового спикера», «Склеить выделенное со спикером…», «Выбрать все реплики…», «Снять выделение»; `renderSelBar()` |
 | Выделенная реплика | `.seg.selected` | клик — одиночное выделение, Ctrl+клик — toggle, Shift+клик — диапазон от `state.segSelAnchor`; Esc — снять; `selectSegment()`/`clearSegmentSelection()`/`repaintSelection()` |
-| Видео-панель | `#video-pane` (`.video-pane`) → `#video-el` (`<video muted playsinline>`), `#video-close`, `#video-note` | над текстом в `.sheet-main` (не закреплена): видна при `state.videoMode==='pane'` и `has_video`; `#video-note` показывает честное сообщение при неподдерживаемом формате (.mkv/.avi) | `applyVideoPane()`, `syncVideoFrame()` |
+| Видео-панель | `#video-pane` (`.video-pane`) → `#video-el` (`<video muted playsinline>`), `#video-close`, `#video-note` | над текстом в `.sheet-main` (закреплена сверху, `position: sticky`): видна при `state.videoMode==='pane'` и `has_video`; `#video-note` показывает честное сообщение при неподдерживаемом формате (.mkv/.avi) | `applyVideoPane()`, `syncVideoFrame()` |
 | Пустое состояние | `#segments .empty` | «В записи нет речи» / «У этого спикера нет реплик» (при фильтре) |
 
 Цвета спикеров: классы `.sp-0`…`.sp-11` (12 цветов, дальше циклически) и
@@ -282,6 +285,14 @@ hover, фокус и прокрутка рейла.
 | `renderResultBar()` | строка результата `#result-bar` под заголовком записи: число говорящих и «Распознать спикеров заново» → `showProcessDialog(rec, 'speakers')` |
 | `startProcess(rec, mode)` | «added» → запуск сразу; всё обработанное и speakers → диалог |
 | `goHome()` | возврат на главный экран (кнопка ⌂ и удаление открытой записи) |
+| `workState(rec)` / `WORK_STATE_LABEL` | состояние разбора: `'done'` если `rec.done_at`, `'editing'` если `rec.edited_at`, иначе `'none'`; подписи «Не начато» / «В работе» / «Завершено» |
+| `buildJobCard(rec)` / `buildRailSection(…)` / `renderRailSections(rail, shown)` | карточка записи (с `.edot` состояния) и секции-заголовки проектов в рейле; группировка по `rec.project`, «Без проекта» последней; открытость — `state.railSections` |
+| `loadProjects()` / `apiProjects(method, url, body)` | реестр проектов: `GET/POST /api/projects`, `PATCH/DELETE /api/projects/{id}`; `state.projects` |
+| `toggleDone(rec, done)` | отметить «Завершено» / вернуть в работу: `patchMeta(rec, {done})` |
+| `openProjectPicker(rec)` / `newProjectDialog(onCreated)` / `manageProjects()` / `renameProject(proj)` / `deleteProject(proj)` | выбор проекта для записи, создание, менеджер проектов (переименование, удаление с переносом записей через `?move_to=`) |
+| `renderOrgBar()` | `#rec-org` в шапке открытой записи: чип проекта (`.proj-chip`) + переключатель «Завершено» (`.done-toggle`) |
+| `applyWorkState(data)` | из ответа `PUT /api/recordings/{id}` (правка реплик/спикеров) подхватывает свежие `edited_at`/`done_at` в `state` и тут же обновляет `.edot` на карточке рейла и в строке таблицы + `renderOrgBar()` — кружок разбора меняется сразу, без полного `loadRail()` |
+| `projectName(id)` / `projectColor(id, rec)` | имя проекта или «Без проекта»; цвет из `rec.project_color` либо `state.projects` |
 
 Сохранение голоса на сервере (`_voiceprint_vector` в app.py): валидный кэш
 `embeddings/<id>.npz` (метки кэша покрывают все длинные метки записи) — готовый

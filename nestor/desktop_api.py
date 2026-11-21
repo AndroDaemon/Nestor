@@ -219,6 +219,18 @@ class DesktopApi:
         except Exception:
             return False
 
+    def close_extra_windows(self) -> bool:
+        """Close every window opened in addition to the main one.
+
+        pywebview tears the application down only once the *last* window is
+        gone (winforms calls ``Application.Exit`` when no forms remain). So if
+        the main window is closed while the presenter screen is still open, the
+        process — and its local server — would linger with a lone video window
+        and no main window. ``desktop.run`` calls this from the main window's
+        ``closed`` event so everything goes down together.
+        """
+        return self.close_watch_window()
+
     def watch_window_open(self) -> bool:
         """Whether the presenter screen still exists (the user may have closed it)."""
         return self._watch_window is not None

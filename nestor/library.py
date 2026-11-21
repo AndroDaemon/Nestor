@@ -115,6 +115,12 @@ class Recording:
     # seconds between the container start and the first audio frame: the
     # transcript clock starts at the audio, the picture at the container
     media_offset: float = 0.0
+    # id of the project (folder) this recording belongs to; empty = uncategorized
+    project: Optional[str] = None
+    # review state: when the transcript was last hand-edited, and when the user
+    # marked the recording finished.  Both empty = "not started yet".
+    edited_at: Optional[str] = None
+    done_at: Optional[str] = None
     segments: List[Segment] = field(default_factory=list)
 
     # ------------------------------------------------------------------ helpers
@@ -164,6 +170,9 @@ class Recording:
             has_video=bool(data.get("has_video", False)),
             video_checked=bool(data.get("video_checked", False)),
             media_offset=float(data.get("media_offset", 0.0) or 0.0),
+            project=data.get("project"),
+            edited_at=data.get("edited_at"),
+            done_at=data.get("done_at"),
         )
         recording.segments = [
             Segment.from_dict(item) for item in data.get("segments", [])
