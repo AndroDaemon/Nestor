@@ -563,11 +563,14 @@
   /* Заголовок записи и её итог не уезжают при прокрутке расшифровки:
      шапка стоит вне области прокрутки (.sheet-main) и не сжимается. */
   .sheet-head {
-    flex: none;
+    flex: none; flex-wrap: wrap;
     display: flex; align-items: flex-start; gap: 14px;
     padding: 14px 0 10px; margin-bottom: 4px;
     background: var(--bg); border-bottom: 1px solid var(--line);
   }
+  /* Итог разбора стоит в шапке (вне области прокрутки) и занимает всю
+     ширину под заголовком, поэтому не уезжает при прокрутке реплик. */
+  .sheet-head .result-bar { flex: 1 1 100%; margin: 4px 0 0; }
   /* Название записи правится прямо здесь: двойной клик открывает тот же
      диалог, что и «Переименовать…» в меню рейла. Подсветка при наведении
      подсказывает, что элемент живой. */
@@ -589,6 +592,42 @@
     border-radius: 99px; font: inherit; font-size: 12px; padding: 2px 11px; cursor: pointer;
   }
   .result-bar .qbtn:hover { border-color: var(--accent); }
+  .result-bar .qbtn.active { border-color: var(--accent); color: var(--accent); background: rgba(9,105,218,.10); }
+  .result-bar .qbtn.danger { border-color: rgba(248,113,113,.55); color: #f87171; }
+  .result-bar .qbtn.danger:hover { border-color: #f87171; }
+  /* Hotkey hints on the first nine speaker chips (1–9 assign a speaker). */
+  .chip-key {
+    flex: none; min-width: 15px; height: 15px; border-radius: 4px;
+    border: 1px solid var(--line-2); color: var(--muted); font-size: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  /* Compact transcript: the speaker cell stays in the grid but is invisible
+     on consecutive rows of the same voice, so names read once per run. */
+  #segments.compact .seg.same-spk .who { visibility: hidden; }
+  /* A doubtful row (very short or changed by the last reprocess) gets a warm
+     time stamp; the tooltip explains why. */
+  .seg.doubtful .time { color: #fbbf24; }
+  .seg.doubtful .time::after { content: " •"; }
+  /* Word clock: each word can be clicked; the playing word is highlighted. */
+  .seg .txt .w { cursor: pointer; border-radius: 3px; }
+  .seg .txt .w:hover { background: rgba(76,194,255,.14); }
+  .seg .txt .w-now { background: rgba(76,194,255,.30); color: #fff; }
+  /* Waveform range selection bar (Shift+drag on the wave). */
+  .range-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 6px; padding: 7px 10px; border-radius: 8px;
+    background: rgba(76,194,255,.08); border: 1px solid rgba(76,194,255,.45);
+    font-size: 12.5px; color: var(--text);
+  }
+  .range-bar .range-hint { color: var(--muted); }
+  .range-bar button {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 7px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 12px;
+  }
+  .range-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .range-bar .range-key { color: var(--muted); font-size: 10.5px; margin-right: 4px; }
+  .range-bar .range-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+  #btn-loop.active { border-color: var(--accent); color: var(--accent); }
   /* Липкая строка спикеров заменена вертикальной панелью справа от текста
      (порядок: Записи — расшифровка — спикеры): список не переносится по
      строкам, поэтому «убегающих» чипов больше нет. Панель сортируется по
@@ -639,10 +678,6 @@
     color: var(--muted); font-size: 11px; letter-spacing: .1em;
     text-transform: uppercase; padding: 2px 6px 5px;
   }
-  /* Расшифровка чисел в заголовке панели: «Участников — N, в «Фоне» — M». */
-  .speakers-panel .panel-sub {
-    color: var(--muted); font-size: 10.5px; padding: 0 6px 5px; margin-top: -3px;
-  }
   /* строка спикера: полная ширина, поэтому показ кнопок при наведении
      больше не «раздвигает» соседей и не переносит элемент на новую строку.
      Полоска загруженности — отдельной строкой ниже, иначе имя не помещается. */
@@ -659,7 +694,7 @@
     flex: none; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
     /* числа стоят справа от полоски, поэтому резервируем им постоянную ширину:
        иначе разное число цифр у соседних строк двигало бы полоски */
-    min-width: 26px; text-align: right;
+    min-width: 26px; text-align: right; white-space: nowrap;
   }
   /* нижняя строка спикера: число реплик слева, полоска занимает остаток */
   .speakers-panel .chip .chip-meta {
@@ -935,6 +970,26 @@
   .modal h2 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
   .modal p, .modal li { color: #cccccc; font-size: 14px; }
   .modal .close { float: right; }
+  .review-progress { color: var(--muted); font-size: 13px; margin: -6px 0 12px; }
+  .review-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: var(--panel, #17191d); }
+  .review-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text); }
+  .review-head .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .review-head span:last-child { color: var(--muted); font-size: 12.5px; }
+  .review-quote { color: #d8d8d8; font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
+  .review-sample-row { display: flex; align-items: center; gap: 10px; }
+  .review-meta { color: var(--muted); font-size: 12.5px; }
+  .review-suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; color: #d8d8d8; }
+  .review-suggest b { color: var(--accent); }
+  .review-label { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
+  .review-label input { display: block; width: 100%; margin-top: 5px; }
+  .review-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .review-merge-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
+  .review-merge-row select { max-width: 280px; }
+  .review-foot { border-top: 1px solid var(--line); padding-top: 12px; }
+  .review-reasons { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+  .review-reason { font-size: 12px; color: #fbbf24; border: 1px solid rgba(251,191,36,.35); border-radius: 999px; padding: 2px 9px; }
+  .review-speakers { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+  .review-spk { display: inline-flex; align-items: center; gap: 6px; }
   .toast {
     position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
     background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
@@ -1142,6 +1197,11 @@
               <span>Строгая склейка по однородности</span>
               <span class="hint">Дополнительная защита: голоса склеиваются только если получившаяся группа звучит однородно. Может дробить одного человека на несколько спикеров — включайте, если предпочитаете больше спикеров вместо крупных блоков. По умолчанию выключено.</span>
             </label>
+            <label class="field wide check-row" id="attach-field">
+              <input type="checkbox" id="attach" style="width:auto" checked>
+              <span>Пришивать короткие осколки к соседнему голосу</span>
+              <span class="hint">Обрывок вроде «ага», для которого не хватило звука на отпечаток голоса, подписывается тем же спикером, что говорил рядом. Работает только для совсем коротких осколков и только если рядом кто-то говорит. Отключите, если Nestor приписал фрагмент не тому человеку.</span>
+            </label>
             <div class="group-label">Словарь терминов</div>
             <label class="field wide check-row">
               <input type="checkbox" id="glossary" style="width:auto">
@@ -1190,6 +1250,7 @@
             <div class="sheet-org" id="rec-org"></div>
           </div>
           <div class="save-state" id="save-state"></div>
+          <div class="result-bar hidden" id="result-bar"></div>
         </div>
         <div class="sheet-body">
           <div class="sheet-main">
@@ -1198,9 +1259,9 @@
               <div class="video-note hidden" id="video-note"></div>
               <button class="video-close" id="video-close" data-tip="Скрыть видео">✕</button>
             </div>
-            <div class="result-bar hidden" id="result-bar"></div>
             <div class="filter-bar hidden" id="filter-bar"></div>
             <div class="sel-bar hidden" id="sel-bar"></div>
+            <div class="range-bar hidden" id="range-bar"></div>
             <div id="segments"></div>
           </div>
           <aside class="speakers-panel" id="speakers-panel">
@@ -1245,6 +1306,7 @@
     <div class="time"><b id="t-pos">00:00</b> / <span id="t-dur">00:00</span></div>
     <div class="dock-actions">
       <button class="btn" id="btn-follow" data-tip="Автопрокрутка: таймлайн следует за текущей репликой">⇣</button>
+      <button class="btn" id="btn-loop" data-tip="Повтор текущей реплики (L)">↻</button>
       <select id="speed" data-tip="Скорость воспроизведения записи">
         <option value="0.5">0.5×</option>
         <option value="0.75">0.75×</option>
@@ -1351,11 +1413,24 @@ const state = {
   match: {},           // speaker id -> {assigned_name, confidence, ...}
   savedVoices: {},     // speaker id -> true (saved during this session)
   view: null,          // zoom window [startSec, endSec] or null = whole take
+  splitMark: null,     // {head, tail, time}: граница последнего разреза на волне
   filterSpeaker: null, // show only this speaker's segments (chip swatch click)
   renderGen: 0,        // bumps on every renderSegments(); stale rows ignore events
   searchCursor: null,  // last segment jumped to by Enter in the search box
   searchTimer: null,   // debounce for the search input
   playUntil: null,     // pause playback when this time is reached (single segment)
+  prerollUntil: null,   // segment start when playback began a little earlier
+  loop: null,           // {segId, start, end}: repeat the active segment
+  rangeSel: null,       // {start, end}: Shift+drag selection on the waveform
+  boundaryMark: null,   // {head, tail, time}: dragged boundary between two segments
+  onlyDoubtful: false,  // show only short/changed segments that need a check
+  onlyChanged: false,   // show only segments changed by the last reprocess
+  diffIds: new Set(),   // ids changed by the last speakers-only reprocess
+  reprocessUndo: null,  // backend snapshot info for "вернуть прежнюю разбивку"
+  resumePending: null,  // saved playhead to restore once the audio metadata is ready
+  playbackRate: 1,      // remembered playback speed
+  compact: false,       // hide repeated speaker names in consecutive rows
+  review: null,         // guided "Назвать голоса" state
   soloTimer: null,     // 50 ms tick that skips other speakers while a filter is on
   railQuery: '',       // rail name filter (substring, lower-case)
   railFilter: 'all',  // rail status filter: all | busy (working + errors) | error
@@ -1369,6 +1444,15 @@ const state = {
 };
 
 const audio = $('audio');
+
+/* Preferences that outlive a recording: speed and the compact transcript view. */
+try {
+  const savedRate = parseFloat(localStorage.getItem('nestor.speed'));
+  if (Number.isFinite(savedRate) && savedRate >= 0.5 && savedRate <= 2) {
+    state.playbackRate = savedRate;
+  }
+  state.compact = localStorage.getItem('nestor.compact') === '1';
+} catch (e) { /* private mode / disabled storage */ }
 
 /* ------------------------------------------------------------------ helpers */
 function fmt(ts) {
@@ -1486,6 +1570,7 @@ function reportText(rec) {
   lines.push(`  подставлять знакомые имена: ${settings.match_voiceprints == null ? '—' : yes(settings.match_voiceprints)}`);
   lines.push(`  объединять похожие голоса: ${settings.merge_speakers == null ? '—' : yes(settings.merge_speakers)}`);
   lines.push(`  порог объединения: ${settings.merge_threshold ?? '—'}`);
+  lines.push(`  пришивать осколки: ${settings.merge_attach_window ? `да (окно ${settings.merge_attach_window} с)` : 'нет'}`);
   lines.push(`  улучшение звука: ${settings.audio_enhance == null ? '—' : yes(settings.audio_enhance)}`);
   lines.push(`  восстановление пропусков: ${settings.rescue_holes == null ? '—' : yes(settings.rescue_holes)}`);
   lines.push(`  исправлять термины по словарю: ${settings.glossary == null ? '—' : yes(settings.glossary)}`);
@@ -2416,7 +2501,64 @@ function refreshRailActivity() {
   }
 }
 
+/* ---------------------------------------------------------- resume position
+   Playhead, zoom and speaker filter are remembered per recording.  Restoring
+   is a seek only — the audio never starts by itself. */
+const RESUME_PREFIX = 'nestor.resume.';
+let resumeSavedAt = 0;
+function loadResume(id) {
+  try {
+    const raw = localStorage.getItem(RESUME_PREFIX + id);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && typeof data.t === 'number' ? data : null;
+  } catch (err) { return null; }
+}
+function saveResumeFor(id) {
+  if (!id || !audio.src) return;
+  try {
+    localStorage.setItem(RESUME_PREFIX + id, JSON.stringify({
+      t: audio.currentTime || 0,
+      view: Array.isArray(state.view) ? state.view.slice(0, 2) : null,
+      filter: state.filterSpeaker || null,
+      active: state.activeId || null,
+      at: Date.now(),
+    }));
+  } catch (err) { /* storage may be full or disabled */ }
+}
+function saveResume() {
+  if (state.current) saveResumeFor(state.current.id);
+}
+function clearResume(id) {
+  try { localStorage.removeItem(RESUME_PREFIX + id); } catch (err) { /* ignore */ }
+}
+function applyResumePending() {
+  const data = state.resumePending;
+  state.resumePending = null;
+  if (!data || !state.current) return;
+  const duration = audio.duration || state.current.duration || 0;
+  if (!(data.t > 0.2) || (duration && data.t >= duration - 0.3)) return;
+  audio.currentTime = data.t;
+  if (Array.isArray(data.view) && data.view.length === 2 &&
+      Number.isFinite(data.view[0]) && Number.isFinite(data.view[1])) {
+    state.view = [data.view[0], data.view[1]];
+  }
+  if (data.filter && state.speakers.includes(data.filter)) state.filterSpeaker = data.filter;
+  if (data.active) state.activeId = data.active;
+  drawWave();
+  highlightActiveSegment();
+  markCurrentWord();
+  if (state.filterSpeaker) { renderChips(); renderSegments(); renderFilterBar(); }
+  const id = state.current.id;
+  toast(`Продолжаем с ${fmt(data.t)}`, 'Начать сначала', () => {
+    clearResume(id);
+    state.view = null;
+    seek(0);
+  });
+}
+
 async function openRecording(id) {
+  if (state.current && state.current.id !== id) saveResumeFor(state.current.id);
   const rec = await (await fetch('/api/recordings/' + id)).json();
   state.current = rec;
   state.names = Object.assign({}, rec.speaker_names || {});
@@ -2433,9 +2575,23 @@ async function openRecording(id) {
   state.peaks = (await (await fetch('/api/recordings/' + id + '/peaks')).json()).peaks || [];
   state.activeId = null;
   state.view = null;  // every recording opens fully zoomed out
+  state.splitMark = null;  // a split boundary belongs to the record we leave
   state.filterSpeaker = null;
   state.searchCursor = null;
   state.playUntil = null;
+  state.prerollUntil = null;
+  state.loop = null;
+  state.rangeSel = null;
+  state.boundaryMark = null;
+  state.onlyDoubtful = false;
+  state.onlyChanged = false;
+  state.review = null;
+  state.reprocessUndo = rec.reprocess_undo || null;
+  state.diffIds = new Set(
+    (rec.reprocess_undo && Array.isArray(rec.reprocess_undo.changed))
+      ? rec.reprocess_undo.changed : []
+  );
+  state.resumePending = loadResume(id);
   // the undo stack and caret memory belong to the record we are leaving: a
   // stale snapshot applied here would overwrite THIS record with the other
   // one's segments and then save them (silent data loss)
@@ -2485,6 +2641,8 @@ async function openRecording(id) {
 
   audio.src = withToken('/api/recordings/' + id + '/media');
   audio.load();
+  audio.playbackRate = state.playbackRate;
+  $('speed').value = String(state.playbackRate);
 
   setTopActions(true);
   applyVideoPane();
@@ -2494,6 +2652,8 @@ async function openRecording(id) {
   renderBookmarks();
   drawWave();
   renderResultBar();
+  renderRangeBar();
+  setLoopIndicator();
   loadRail();
 }
 
@@ -2733,6 +2893,47 @@ function scopeBackgroundMark(ids) {
    Служебная группа «Фон»: конец блока.
    -------------------------------------------------------------------------- */
 
+/* Сколько времени говорит каждый участник.  Считаем по текущей разбивке:
+   длительность реплик, число ходов, средняя и самая длинная реплика. */
+function meetingStats(mainIds) {
+  const byId = new Map();
+  let total = 0;
+  for (const seg of (state.current ? state.current.segments : [])) {
+    const dur = Math.max(0, (seg.end || 0) - (seg.start || 0));
+    if (!dur) continue;
+    const id = seg.speaker;
+    if (!id || !mainIds.includes(id)) continue;
+    let item = byId.get(id);
+    if (!item) { item = { id, seconds: 0, turns: 0, longest: 0 }; byId.set(id, item); }
+    item.seconds += dur;
+    item.turns += 1;
+    item.longest = Math.max(item.longest, dur);
+    total += dur;
+  }
+  return {
+    total,
+    rows: mainIds
+      .map(id => byId.get(id))
+      .filter(Boolean)
+      .map(item => ({
+        ...item,
+        share: total ? item.seconds / total : 0,
+        avg: item.turns ? item.seconds / item.turns : 0,
+      }))
+      .sort((a, b) => b.seconds - a.seconds),
+  };
+}
+
+function fmtTalk(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return h
+    ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+    : `${m}:${String(r).padStart(2, '0')}`;
+}
+
 function renderChips() {
   const box = $('speakers-panel');
   if (!box) return;
@@ -2743,7 +2944,7 @@ function renderChips() {
   const speakers = state.speakers;
   const counts = speakerCounts();
   if (!speakers.length) {
-    title.textContent = 'Спикеры';
+    title.textContent = 'Спикеры записи';
     return;
   }
 
@@ -2752,19 +2953,14 @@ function renderChips() {
   const mainIds = speakers.filter((id) => !bgIds.has(id));
   const bgList = speakers.filter((id) => bgIds.has(id));
 
-  // «Спикеры (XX / YY)»: XX — сколько ярлыков считаем спикерами, YY — сколько
-  // ушло в служебную группу «Фон» (мелкие осколки и «шум»/«фон»).
-  title.textContent = `Спикеры (${mainIds.length} / ${bgList.length})`;
-  title.dataset.tip = bgList.length
-    ? `Спикеров: ${mainIds.length}. В группе «Фон» (мелкие ярлыки и шум): ${bgList.length}`
-    : `Спикеров: ${mainIds.length}. Группа «Фон» пуста`;
-  // Голая пара чисел ничего не говорит: подписываем, что они значат.
-  if (bgList.length) {
-    const legend = document.createElement('div');
-    legend.className = 'panel-sub';
-    legend.textContent = `Участников — ${mainIds.length}, в «Фоне» — ${bgList.length}`;
-    box.appendChild(legend);
-  }
+  // Сводка по речи живёт прямо в чипах: отдельная карточка со списком тех же
+  // людей дублировала бы панель. В чипе — время и доля, в тултипе — реплики,
+  // средняя и самая длинная; в заголовке — только общая длительность речи.
+  const talk = meetingStats(mainIds);
+  const talkById = new Map(talk.rows.map(row => [row.id, row]));
+  const maxTalk = talk.rows.reduce((max, row) => Math.max(max, row.seconds), 0);
+  title.textContent = 'Спикеры записи';
+  title.dataset.tip = `Список голосов этой записи. Всего речи: ${fmtTalk(talk.total)}. Сколько всего спикеров и сколько без имени — в строке результата сверху`;
 
   // names that occur on more than one chip - highlighted as duplicates
   const nameCounts = {};
@@ -2784,6 +2980,14 @@ function renderChips() {
     const row = document.createElement('div');
     row.className = 'chip-row';
     chip.appendChild(row);
+    const keyNo = mainIds.indexOf(id) + 1;
+    if (keyNo <= 9) {
+      const key = document.createElement('span');
+      key.className = 'chip-key';
+      key.textContent = String(keyNo);
+      key.dataset.tip = `Клавиша ${keyNo}: назначить выделенные или текущую реплику этому спикеру`;
+      row.appendChild(key);
+    }
     const sw = document.createElement('span');
     sw.className = 'swatch';
     sw.style.background = speakerColor(id);
@@ -2845,28 +3049,37 @@ function renderChips() {
       row.appendChild(badge);
     }
     row.appendChild(input);
-    // Нижняя строка: число реплик (с процентом узнавания) и полоска
-    // загруженности. Обе величины стоят под именем, чтобы кнопки в верхней
-    // строке не отнимали ширину у поля имени.
+    // Нижняя строка: время речи и доля от общей, полоска — та же доля.
+    // Отдельной карточки со списком участников нет: все цифры живут в чипе,
+    // а реплики, средняя и самая длинная — в подсказке.
     const meta = document.createElement('div');
     meta.className = 'chip-meta';
     const n = counts[id] || 0;
+    const talkRow = talkById.get(id);
     const conf = matchInfo && matchInfo.assigned_name
       ? ` · ${Math.round((matchInfo.confidence || 0) * 100)}%` : '';
     const count = document.createElement('span');
     count.className = 'chip-count';
-    count.textContent = `${n}${conf}`;
-    count.dataset.tip = conf
-      ? `Реплик: ${n}; совпадение с сохранённым голосом: ${conf.trim().replace('· ', '')}`
-      : `Реплик: ${n}`;
-    // Нагрузочная полоска: доля этого спикера от самого разговорчивого.
+    count.textContent = talkRow
+      ? `${fmtTalk(talkRow.seconds)} · ${Math.round(talkRow.share * 100)}%`
+      : `${n}${conf}`;
+    count.dataset.tip = talkRow
+      ? `Речь: ${fmtTalk(talkRow.seconds)} (${Math.round(talkRow.share * 100)}% от общей). ` +
+        `Реплик: ${n}${conf ? `; совпадение с сохранённым голосом: ${conf.trim().replace('· ', '')}` : ''}. ` +
+        `Средняя: ${fmtTalk(talkRow.avg)}. Самая длинная: ${fmtTalk(talkRow.longest)}`
+      : (conf
+        ? `Реплик: ${n}; совпадение с сохранённым голосом: ${conf.trim().replace('· ', '')}`
+        : `Реплик: ${n}`);
+    // Нагрузочная полоска: доля речи этого спикера от самого разговорчивого.
     // Цифры стоят справа от полоски, чтобы её левый край был общим у всех
     // строк и полоски не съезжали из-за разного числа цифр.
     const bar = document.createElement('span');
     bar.className = 'chip-bar';
     const fill = document.createElement('i');
     fill.className = 'chip-bar-fill';
-    fill.style.width = `${Math.round((n / maxCount) * 100)}%`;
+    const weight = talkRow ? talkRow.seconds : n;
+    const maxWeight = maxTalk || maxCount || 1;
+    fill.style.width = `${Math.round((weight / maxWeight) * 100)}%`;
     fill.style.background = speakerColor(id);
     bar.appendChild(fill);
     meta.appendChild(bar);
@@ -2986,13 +3199,65 @@ function renderResultBar() {
     return;
   }
   const total = state.speakers.length;
-  const unnamed = state.speakers.filter(id => !(state.names[id] || '').trim()).length;
+  const bgSet = backgroundIds();
+  const bgCount = state.speakers.filter(id => bgSet.has(id)).length;
+  const unnamed = assignableSpeakers().filter(id => !(state.names[id] || '').trim()).length;
+  const confident = confidentMatches();
+  const doubtful = rec.segments.filter(seg => doubtfulReason(seg).length).length;
+  const changed = unreviewedDiffIds().length;
+  const undoInfo = state.reprocessUndo;
   bar.innerHTML = '';
   const lead = document.createElement('span');
   lead.className = 'lead';
   lead.textContent = `Найдено ${total} ${plural(total, 'спикер', 'спикера', 'спикеров')}` +
-    (unnamed ? ` · без имени: ${unnamed}` : ' · всем заданы имена');
+    (unnamed ? ` · без имени: ${unnamed}` : ' · всем заданы имена') +
+    (bgCount ? ` · в «Фоне»: ${bgCount}` : '') +
+    (undoInfo && undoInfo.available
+      ? ` · после переобработки: ${undoInfo.before_speakers} → ${undoInfo.after_speakers}`
+      : '');
   bar.appendChild(lead);
+  const addBtn = (text, tip, onclick, cls) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'qbtn' + (cls ? ' ' + cls : '');
+    b.textContent = text;
+    if (tip) b.dataset.tip = tip;
+    b.onclick = onclick;
+    bar.appendChild(b);
+    return b;
+  };
+  if (unnamed) {
+    addBtn(`Назвать голоса (${unnamed})`, 'Провести по незнакомым голосам по очереди: послушать, назвать или отправить в фон', startVoiceReview);
+  }
+  if (confident.length) {
+    const names = confident.map(([id]) => state.match[id].assigned_name).slice(0, 4).join(', ');
+    addBtn(`Принять узнанных: ${confident.length}`,
+      `Уверенные совпадения с сохранёнными голосами: ${names}${confident.length > 4 ? '…' : ''}`,
+      acceptConfidentMatches);
+  }
+  if (doubtful) {
+    addBtn(`Разобрать спорные (${doubtful})`, 'Провести по коротким и изменившимся репликам по очереди: 1–9 — голос, Enter — оставить, S — пропустить',
+      startSegmentReview);
+    addBtn(`Только спорные: ${doubtful}`, 'Оставить в списке только короткие реплики и реплики, изменившиеся после переобработки',
+      toggleDoubtfulFilter, state.onlyDoubtful ? 'active' : '');
+  }
+  if (changed) {
+    addBtn(`Изменённые: ${changed}`, 'Показать только реплики, которым переобработка сменила спикера',
+      toggleChangedFilter, state.onlyChanged ? 'active' : '');
+  }
+  addBtn('Склеить подряд', 'Соединить соседние реплики одного спикера с короткой паузой',
+    showMergeConsecutiveDialog);
+  addBtn(state.compact ? 'Компактно ✓' : 'Компактно',
+    'Показывать имя спикера один раз подряд для соседних реплик',
+    toggleCompact, state.compact ? 'active' : '');
+  if (undoInfo && undoInfo.available && !undoInfo.failed) {
+    addBtn('Вернуть прежнюю разбивку', 'Вернуть спикеров, которые были до последней переобработки', undoSpeakersReprocess, 'danger');
+  } else if (undoInfo && undoInfo.failed) {
+    const warn = document.createElement('span');
+    warn.className = 'lead';
+    warn.textContent = 'переобработка не завершилась';
+    bar.appendChild(warn);
+  }
   const speak = document.createElement('button');
   speak.type = 'button';
   speak.className = 'qbtn';
@@ -3001,6 +3266,531 @@ function renderResultBar() {
   speak.onclick = () => showProcessDialog(state.current, 'speakers');
   bar.appendChild(speak);
   bar.classList.remove('hidden');
+}
+
+function toggleDoubtfulFilter() {
+  state.onlyDoubtful = !state.onlyDoubtful;
+  if (state.onlyDoubtful) state.onlyChanged = false;
+  renderSegments();
+}
+function toggleChangedFilter() {
+  state.onlyChanged = !state.onlyChanged;
+  if (state.onlyChanged) state.onlyDoubtful = false;
+  renderSegments();
+}
+function toggleCompact() {
+  state.compact = !state.compact;
+  try { localStorage.setItem('nestor.compact', state.compact ? '1' : '0'); } catch (e) { /* ignore */ }
+  renderSegments();
+}
+function confidentMatches() {
+  const threshold = 0.9;
+  const bg = backgroundIds();
+  return Object.entries(state.match || {}).filter(([id, m]) => {
+    if (!m || !m.assigned_name || bg.has(id)) return false;
+    if ((m.confidence || 0) < threshold) return false;
+    const current = (state.names[id] || '').trim();
+    return !current || current === m.assigned_name;
+  });
+}
+function acceptConfidentMatches() {
+  const list = confidentMatches();
+  if (!list.length) return;
+  snapshot();
+  for (const [id, m] of list) {
+    state.names[id] = m.assigned_name;
+    delete state.match[id];
+    if (!state.keep.includes(id)) state.keep.push(id);
+  }
+  markDirty();
+  sortChips();
+  renderChips();
+  renderSegments();
+  drawWave();
+  toast(`Принято имён: ${list.length}`, 'Отменить', undo);
+}
+
+/* ------------------------------------------------------- «Назвать голоса»
+   Линейный проход по незнакомым голосам: один голос на экран, пример
+   проигрывается по кнопке, рядом подсказка из библиотеки голосов.  Действия
+   (принять / вписать имя / склеить / в фон / пропустить) сразу переходят к
+   следующему.  Это заменяет охоту за чипами и лишние клики. */
+function reviewCandidates() {
+  return assignableSpeakers().filter(id => !(state.names[id] || '').trim());
+}
+
+function reviewSamples(id) {
+  if (!state.current) return [];
+  return state.current.segments
+    .filter(seg => seg.speaker === id)
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start))
+    .slice(0, 4);
+}
+
+function startVoiceReview() {
+  const queue = reviewCandidates();
+  if (!queue.length) return toast('Все голоса уже названы');
+  state.review = { queue, index: 0, sample: 0 };
+  renderVoiceReview();
+}
+
+function reviewAdvance() {
+  const review = state.review;
+  if (!review) return;
+  review.index += 1;
+  review.sample = 0;
+  // a merge or naming can make the rest of the queue empty mid-way
+  while (review.index < review.queue.length) {
+    const id = review.queue[review.index];
+    if (state.speakers.includes(id) && !(state.names[id] || '').trim()) break;
+    review.index += 1;
+  }
+  if (review.index >= review.queue.length) {
+    state.review = null;
+    closeModal();
+    renderChips();
+    renderSegments();
+    drawWave();
+    return toast('Голоса названы');
+  }
+  renderVoiceReview();
+}
+
+function reviewApplyName(rawName) {
+  const review = state.review;
+  if (!review) return;
+  const id = review.queue[review.index];
+  const name = String(rawName || '').trim();
+  if (!name) return toast('Впишите имя или пропустите голос');
+  snapshot();
+  state.names[id] = name;
+  delete state.match[id];
+  if (!state.keep.includes(id)) state.keep.push(id);
+  markDirty();
+  sortChips();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+  drawWave();
+  reviewAdvance();
+}
+
+function reviewSendBackground() {
+  const review = state.review;
+  if (!review) return;
+  const id = review.queue[review.index];
+  setBackgroundLabel(id, true);
+  reviewAdvance();
+}
+
+/* Client-side merge of two labels: the same operation the selection merge bar
+   does, kept undoable and followed by a normal save. */
+function mergeSpeakerInto(source, target) {
+  if (!source || !target || source === target) return;
+  snapshot();
+  for (const seg of state.current.segments) {
+    if (seg.speaker === source) seg.speaker = target;
+  }
+  const sourceName = (state.names[source] || '').trim();
+  if (sourceName && !(state.names[target] || '').trim() && !isBackground(source)) {
+    state.names[target] = sourceName;
+  }
+  delete state.names[source];
+  delete state.match[source];
+  state.keep = (state.keep || []).filter(x => x !== source);
+  syncSpeakersFromSegments();
+  markDirty();
+  sortChips();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+  drawWave();
+}
+
+function renderVoiceReview() {
+  const review = state.review;
+  if (!review) return;
+  const id = review.queue[review.index];
+  if (!id || !state.speakers.includes(id)) { reviewAdvance(); return; }
+  const counts = speakerCounts();
+  const total = review.queue.length;
+  const current = review.index + 1;
+  const samples = reviewSamples(id);
+  const match = state.match[id];
+  const pct = match ? Math.round((match.confidence || 0) * 100) : 0;
+  const options = state.speakers
+    .filter(target => target !== id)
+    .map(target => `<option value="${escapeHtml(target)}">${escapeHtml(speakerName(target))}${target !== speakerName(target) ? ' · ' + escapeHtml(target) : ''}</option>`)
+    .join('');
+  const suggestion = match && match.assigned_name
+    ? `<div class="review-suggest">Похож на <b>${escapeHtml(match.assigned_name)}</b> · ${pct}%
+         <button type="button" class="btn" id="review-accept">Принять имя</button></div>`
+    : '';
+  showModal(`
+    <h1>Назвать голоса</h1>
+    <div class="review-progress">Голос ${current} из ${total} · осталось ${total - current + 1}</div>
+    <div class="review-card">
+      <div class="review-head">
+        <span class="swatch" style="background:${speakerColor(id)}"></span>
+        <b>${escapeHtml(id)}</b>
+        <span>${counts[id] || 0} ${plural(counts[id] || 0, 'реплика', 'реплики', 'реплик')}</span>
+      </div>
+      <div class="review-quote">${samples.length ? escapeHtml(samples[0].text) : 'У этого голоса нет реплик для примера'}</div>
+      <div class="review-sample-row">
+        <button type="button" class="btn" id="review-play" ${samples.length ? '' : 'disabled'}>▶ Послушать пример</button>
+        <span id="review-sample-meta" class="review-meta">${samples.length ? `${fmt(samples[0].start)} · ${samples.length} ${plural(samples.length, 'пример', 'примера', 'примеров')}` : 'нет примеров'}</span>
+      </div>
+    </div>
+    ${suggestion}
+    <label class="review-label">Имя голоса
+      <input id="review-name" type="text" autocomplete="off" placeholder="Например, Анна" value="${escapeHtml(state.names[id] || '')}">
+    </label>
+    <div class="review-actions">
+      <button type="button" class="btn primary" id="review-save">Сохранить и далее</button>
+      <button type="button" class="btn" id="review-skip">Пропустить</button>
+      <button type="button" class="btn" id="review-bg">В фон</button>
+    </div>
+    <div class="review-merge-row">
+      <span>Или это тот же человек, что</span>
+      <select id="review-merge">${options || '<option value="">нет других голосов</option>'}</select>
+      <button type="button" class="btn" id="review-merge-btn" ${options ? '' : 'disabled'}>Склеить</button>
+    </div>
+    <div class="review-foot"><button type="button" class="btn" id="review-close">Закрыть</button></div>
+  `, true);
+  const input = $('review-name');
+  if (input) {
+    attachNameSuggestions(input, id);
+    input.focus();
+    input.select();
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); reviewApplyName(input.value); }
+    };
+  }
+  const play = $('review-play');
+  if (play) play.onclick = () => {
+    if (!samples.length) return;
+    const sample = samples[review.sample % samples.length];
+    const end = Math.min(sample.end, sample.start + 6);
+    playRange(sample.start, end, 0.3);
+    review.sample = (review.sample + 1) % samples.length;
+    const meta = $('review-sample-meta');
+    if (meta) meta.textContent = `${fmt(sample.start)} · ${review.sample + 1} из ${samples.length}`;
+  };
+  const accept = $('review-accept');
+  if (accept) accept.onclick = () => reviewApplyName(state.match[id] && state.match[id].assigned_name);
+  const save = $('review-save');
+  if (save) save.onclick = () => reviewApplyName($('review-name').value);
+  const skip = $('review-skip');
+  if (skip) skip.onclick = () => reviewAdvance();
+  const bg = $('review-bg');
+  if (bg) bg.onclick = reviewSendBackground;
+  const mergeBtn = $('review-merge-btn');
+  if (mergeBtn) mergeBtn.onclick = () => {
+    const target = $('review-merge').value;
+    if (!target) return;
+    mergeSpeakerInto(id, target);
+    reviewAdvance();
+  };
+  const close = $('review-close');
+  if (close) close.onclick = () => { state.review = null; closeModal(); };
+}
+/* ------------------------------------------------- «Разобрать спорные»
+   Один короткий или изменённый переобработкой фрагмент на экран.  Цифры
+   1–9 сразу назначают голос и идут дальше, Enter оставляет текущего
+   спикера, S пропускает.  Подтверждённая реплика получает reviewed и
+   больше не попадает в очередь. */
+function segmentReviewCandidates() {
+  if (!state.current) return [];
+  return state.current.segments
+    .filter(seg => doubtfulReason(seg).length)
+    .sort((a, b) => a.start - b.start);
+}
+
+function startSegmentReview() {
+  const queue = segmentReviewCandidates().map(seg => seg.id);
+  if (!queue.length) return toast('Спорных реплик нет');
+  if (!audio.paused) { audio.pause(); $('btn-play').textContent = '▶'; }
+  state.review = { kind: 'segments', queue, index: 0, done: 0, skipped: 0 };
+  renderSegmentReview();
+}
+
+function segmentReviewCurrent() {
+  const review = state.review;
+  if (!review || review.kind !== 'segments' || !state.current) return null;
+  const id = review.queue[review.index];
+  return state.current.segments.find(seg => seg.id === id) || null;
+}
+
+function reviewSegmentAdvance() {
+  const review = state.review;
+  if (!review || review.kind !== 'segments') return;
+  review.index += 1;
+  while (review.index < review.queue.length) {
+    const id = review.queue[review.index];
+    const seg = state.current && state.current.segments.find(s => s.id === id);
+    if (seg && doubtfulReason(seg).length) break;
+    review.index += 1;
+  }
+  if (review.index >= review.queue.length) {
+    const done = review.done;
+    const skipped = review.skipped;
+    state.review = null;
+    closeModal();
+    renderChips();
+    renderSegments();
+    drawWave();
+    return toast(`Спорные: проверено ${done}${skipped ? `, пропущено ${skipped}` : ''}`);
+  }
+  renderSegmentReview();
+}
+
+function reviewSegmentCommit(speaker) {
+  const review = state.review;
+  const seg = segmentReviewCurrent();
+  if (!review || !seg) return reviewSegmentAdvance();
+  snapshot();
+  if (speaker && speaker !== seg.speaker) {
+    seg.speaker = speaker;
+    if (!(speaker in state.names)) state.names[speaker] = '';
+    if (!state.keep.includes(speaker) && !backgroundIds().has(speaker)) state.keep.push(speaker);
+  }
+  seg.reviewed = true;
+  review.done += 1;
+  syncSpeakersFromSegments();
+  markDirty();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+  drawWave();
+  reviewSegmentAdvance();
+}
+
+function reviewSegmentSkip() {
+  const review = state.review;
+  if (!review || review.kind !== 'segments') return;
+  review.skipped += 1;
+  review.index += 1;
+  while (review.index < review.queue.length) {
+    const id = review.queue[review.index];
+    const seg = state.current && state.current.segments.find(s => s.id === id);
+    if (seg && doubtfulReason(seg).length) break;
+    review.index += 1;
+  }
+  if (review.index >= review.queue.length) {
+    const done = review.done;
+    const skipped = review.skipped;
+    state.review = null;
+    closeModal();
+    renderChips();
+    renderSegments();
+    drawWave();
+    return toast(`Спорные: проверено ${done}, пропущено ${skipped}`);
+  }
+  renderSegmentReview();
+}
+
+function reviewSegmentPrev() {
+  const review = state.review;
+  if (!review || review.kind !== 'segments') return;
+  review.index = Math.max(0, review.index - 1);
+  while (review.index > 0) {
+    const id = review.queue[review.index];
+    const seg = state.current && state.current.segments.find(s => s.id === id);
+    if (seg && doubtfulReason(seg).length) break;
+    review.index -= 1;
+  }
+  renderSegmentReview();
+}
+
+function renderSegmentReview() {
+  const review = state.review;
+  const seg = segmentReviewCurrent();
+  if (!review) return;
+  if (!seg) { reviewSegmentAdvance(); return; }
+  const total = review.queue.length;
+  const current = review.index + 1;
+  const reasons = doubtfulReason(seg);
+  const speakerBtns = assignableSpeakers().slice(0, 9).map((id, i) => `
+    <button type="button" class="btn review-spk" data-spk="${escapeHtml(id)}">
+      <span class="range-key">${i + 1}</span>
+      <span class="range-dot" style="background:${speakerColor(id)}"></span>
+      ${escapeHtml(speakerName(id))}
+    </button>`).join('');
+  const reasonHtml = reasons.map(r => `<span class="review-reason">${escapeHtml(r)}</span>`).join('');
+  showModal(`
+    <h1>Разобрать спорные</h1>
+    <div class="review-progress">Реплика ${current} из ${total} · проверено ${review.done}${review.skipped ? `, пропущено ${review.skipped}` : ''}</div>
+    <div class="review-card">
+      <div class="review-head">
+        <span class="swatch" style="background:${speakerColor(seg.speaker)}"></span>
+        <b>${escapeHtml(speakerName(seg.speaker))}</b>
+        <span>${fmt(seg.start)}–${fmt(seg.end)} · ${(seg.end - seg.start).toFixed(1)} с</span>
+      </div>
+      <div class="review-quote">${escapeHtml(seg.text)}</div>
+      <div class="review-reasons">${reasonHtml}</div>
+      <div class="review-sample-row">
+        <button type="button" class="btn" id="review-play">▶ Послушать</button>
+        <span class="review-meta">Клавиши 1–9 — назначить · Enter — оставить · S — пропустить</span>
+      </div>
+    </div>
+    <div class="review-speakers">${speakerBtns || '<span class="review-meta">Нет доступных голосов</span>'}</div>
+    <div class="review-actions">
+      <button type="button" class="btn primary" id="review-confirm">Оставить «${escapeHtml(speakerName(seg.speaker))}» (Enter)</button>
+      <button type="button" class="btn" id="review-skip">Пропустить (S)</button>
+      <button type="button" class="btn" id="review-prev" ${review.index ? '' : 'disabled'}>Назад</button>
+    </div>
+    <div class="review-foot"><button type="button" class="btn" id="review-close">Закрыть</button></div>
+  `, true);
+  if (!audio.paused) { audio.pause(); $('btn-play').textContent = '▶'; }
+  seek(seg.start);
+  setActiveSegmentId(seg.id);
+  const play = $('review-play');
+  if (play) play.onclick = () => playRange(seg.start, seg.end, 0.5);
+  const confirm = $('review-confirm');
+  if (confirm) confirm.onclick = () => reviewSegmentCommit(seg.speaker);
+  const skip = $('review-skip');
+  if (skip) skip.onclick = reviewSegmentSkip;
+  const prev = $('review-prev');
+  if (prev) prev.onclick = reviewSegmentPrev;
+  const close = $('review-close');
+  if (close) close.onclick = () => { state.review = null; closeModal(); };
+  document.querySelectorAll('.review-spk').forEach(btn => {
+    btn.onclick = () => reviewSegmentCommit(btn.dataset.spk);
+  });
+}
+
+/* Соседние реплики одного спикера с короткой паузой — это почти всегда
+   одно высказывание, разрезанное диаризацией.  Склеиваем только по явной
+   команде, закладки не трогаем, откат — обычный Ctrl+Z. */
+function mergeGap() {
+  let value = 0.7;
+  try {
+    const saved = parseFloat(localStorage.getItem('nestor.mergeGap'));
+    if (Number.isFinite(saved) && saved >= 0 && saved <= 10) value = saved;
+  } catch (e) { /* ignore */ }
+  return value;
+}
+
+function mergeGapGroups(limit) {
+  const segs = state.current ? state.current.segments : [];
+  const groups = [];
+  let i = 0;
+  while (i < segs.length) {
+    let j = i + 1;
+    if (!segs[i].bookmark) {
+      while (j < segs.length &&
+             segs[j].speaker === segs[i].speaker &&
+             !segs[j].bookmark &&
+             (segs[j].start - segs[j - 1].end) <= limit + 1e-6) {
+        j += 1;
+      }
+    }
+    if (j - i > 1) groups.push([i, j]);
+    i = j;
+  }
+  return groups;
+}
+
+function mergeConsecutiveSegments(limit) {
+  const groups = mergeGapGroups(limit);
+  if (!groups.length) {
+    toast('Нет соседних реплик одного спикера в этом окне паузы');
+    return 0;
+  }
+  snapshot();
+  const segs = state.current.segments;
+  let removed = 0;
+  // справа налево, чтобы индексы групп оставались валидными
+  for (let g = groups.length - 1; g >= 0; g -= 1) {
+    const [a, b] = groups[g];
+    const first = segs[a];
+    const tail = segs.slice(a + 1, b);
+    const allClock = hasWordClock(first) && tail.every(hasWordClock);
+    const words = allClock ? [].concat(first.words, ...tail.map(s => s.words)) : [];
+    const text = [first, ...tail]
+      .map(s => s.text || '')
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    first.end = tail[tail.length - 1].end;
+    first.text = text;
+    first.words = words;
+    first.reviewed = true;      // человек только что подтвердил эту склейку
+    for (const seg of [first, ...tail]) state.diffIds.delete(seg.id);
+    removed += tail.length;
+    segs.splice(a + 1, b - (a + 1));
+  }
+  state.segSel.clear();
+  state.segSelAnchor = null;
+  syncSpeakersFromSegments();
+  markDirty();
+  renderChips();
+  renderSegments();
+  renderBookmarks();
+  drawWave();
+  toast(`Склеено ${removed} ${plural(removed, 'реплика', 'реплики', 'реплик')}`, 'Отменить', undo);
+  return removed;
+}
+
+function showMergeConsecutiveDialog() {
+  if (!state.current) return;
+  const initial = mergeGap();
+  const preview = () => {
+    const limit = Math.max(0, Math.min(10, parseFloat($('merge-gap').value) || 0));
+    const groups = mergeGapGroups(limit);
+    const rows = groups.reduce((n, [a, b]) => n + (b - a), 0);
+    const note = $('merge-preview');
+    if (note) {
+      note.textContent = groups.length
+        ? `Будет склеено групп: ${groups.length}, убрано лишних строк: ${rows}`
+        : 'В этом окне паузы склеивать нечего';
+    }
+  };
+  showModal(`
+    <h1>Склеить подряд</h1>
+    <p class="review-meta">Соседние реплики одного спикера с паузой не больше указанной станут одной репликой. Реплики с закладками не трогаем.</p>
+    <label class="review-label">Пауза, секунд
+      <input id="merge-gap" type="number" min="0" max="10" step="0.1" value="${initial}">
+    </label>
+    <div id="merge-preview" class="review-meta" style="margin-bottom:12px"></div>
+    <div class="review-actions">
+      <button type="button" class="btn primary" id="merge-run">Склеить</button>
+      <button type="button" class="btn" id="merge-cancel">Отмена</button>
+    </div>
+  `);
+  const input = $('merge-gap');
+  if (input) { input.oninput = preview; input.focus(); input.select(); }
+  preview();
+  $('merge-run').onclick = () => {
+    const limit = Math.max(0, Math.min(10, parseFloat(input.value) || 0));
+    try { localStorage.setItem('nestor.mergeGap', String(limit)); } catch (e) { /* ignore */ }
+    closeModal();
+    mergeConsecutiveSegments(limit);
+  };
+  $('merge-cancel').onclick = closeModal;
+}
+
+async function undoSpeakersReprocess() {
+  const info = state.reprocessUndo;
+  if (!info || !info.available || !state.current) return;
+  const ok = await showConfirm(
+    'Вернуть прежнюю разбивку? Текст и правки останутся, но спикеры снова станут такими, как до переобработки.',
+    { confirmText: 'Вернуть' }
+  );
+  if (!ok) return;
+  if (state.dirty) await save();
+  const id = state.current.id;
+  let res;
+  try {
+    res = await fetch(`/api/recordings/${id}/speakers/undo`, { method: 'POST' });
+  } catch (e) {
+    return toast('Сеть недоступна — разбивка не возвращена');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(data.detail || 'Не удалось вернуть прежнюю разбивку');
+  toast('Прежняя разбивка возвращена');
+  await openRecording(id);
 }
 
 /* The "remember voice" flow for a chip whose name is shared with other
@@ -3664,6 +4454,7 @@ function renderSegments() {
   state.renderGen = (state.renderGen || 0) + 1;
   box.innerHTML = '';
   box.classList.remove('has-editing');
+  box.classList.toggle('compact', !!state.compact);
   if (!state.current || !state.current.segments.length) {
     box.innerHTML = '<div class="empty">В записи нет речи</div>';
     updateSearchCount(0);
@@ -3673,14 +4464,23 @@ function renderSegments() {
   }
   const query = $('search').value.trim().toLowerCase();
   let matches = 0;
+  let lastSpeaker = null;
 
   for (const seg of state.current.segments) {
     if (state.filterSpeaker && seg.speaker !== state.filterSpeaker) continue;
+    if (state.onlyDoubtful && !doubtfulReason(seg).length) continue;
+    if (state.onlyChanged && !state.diffIds.has(seg.id)) continue;
     if (query && !seg.text.toLowerCase().includes(query)) continue;
     if (query) matches++;
+    const sameSpk = state.compact && lastSpeaker === seg.speaker;
+    if (!sameSpk) lastSpeaker = seg.speaker;
+    const doubt = doubtfulReason(seg);
     const row = document.createElement('div');
-    row.className = 'seg' + (query ? ' hit' : '') + (state.segSel.has(seg.id) ? ' selected' : '');
+    row.className = 'seg' + (query ? ' hit' : '') +
+      (state.segSel.has(seg.id) ? ' selected' : '') +
+      (sameSpk ? ' same-spk' : '') + (doubt.length ? ' doubtful' : '');
     row.dataset.id = seg.id;
+    if (doubt.length) row.dataset.tip = 'Проверить: ' + doubt.join(' · ');
 
     const time = document.createElement('div');
     time.className = 'time';
@@ -3704,11 +4504,16 @@ function renderSegments() {
     // highlighted text while searching; clicking into it drops the markup and
     // hands the user clean, editable text (caret offset maps across either)
     if (query) text.innerHTML = highlightHTML(seg.text, query);
-    else text.textContent = seg.text;
+    else {
+      const withWords = wordHtml(seg);
+      if (withWords) text.innerHTML = withWords;
+      else text.textContent = seg.text;
+    }
     text.oninput = () => {
       if (gen !== state.renderGen) return;  // stale node from a previous render
       seg.text = text.innerText; rememberCaret(seg, text); markDirty();
     };
+    text.onbeforeinput = () => pauseForTyping();
     text.onblur = () => {
       // after a re-render (split, undo, filter) this element is detached and the
       // browser may still fire blur on it: writing its text back would resurrect
@@ -3727,7 +4532,10 @@ function renderSegments() {
       } else {
         dropEditSnapshot();
       }
-      if (query) renderSegments();   // re-apply the highlight after editing
+      // Re-apply search markup or the clickable word spans after editing.
+      // Even when the text no longer matches the old word clock, the stale
+      // spans must be replaced with plain text.
+      if (query || hasWordClock(seg) || text.querySelector('.w')) renderSegments();
     };
     text.onmouseup = text.onkeyup = () => rememberCaret(seg, text);
     text.onkeydown = (e) => {
@@ -3738,7 +4546,25 @@ function renderSegments() {
         splitSegment(seg, text);
       }
     };
+    // Click a word to jump to it; double-click plays just that word. The text
+    // stays editable: a click still places the caret, and the word spans are
+    // flattened to plain text on focus.
+    text.onclick = (e) => {
+      const w = e.target && e.target.closest ? e.target.closest('.w') : null;
+      if (!w || !hasWordClock(seg)) return;
+      const i = Number(w.dataset.w);
+      if (seg.words[i]) seek(seg.words[i].start);
+    };
+    text.ondblclick = (e) => {
+      const w = e.target && e.target.closest ? e.target.closest('.w') : null;
+      if (!w || !hasWordClock(seg)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      playWord(seg, Number(w.dataset.w));
+    };
     text.onfocus = () => {
+      // search markup is dropped on focus (the caret must map to plain text);
+      // word spans stay, otherwise a double-click could no longer name its word
       if (text.querySelector('mark')) text.textContent = seg.text;
       text.classList.add('editing');
       box.classList.add('has-editing');
@@ -3780,7 +4606,7 @@ function renderSegments() {
     row.appendChild(time);
     row.appendChild(body);
     row.onclick = (e) => {
-      if (e.target === text) return;
+      if (text.contains(e.target)) return;
       // Shift/Ctrl+click select the segment instead of seeking; a plain click
       // seeks (the old behaviour) and clears any selection.
       if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -3791,19 +4617,25 @@ function renderSegments() {
       if (state.segSel.size) { clearSegmentSelection(); return; }
       seek(seg.start);
     };
-    row.ondblclick = (e) => { if (e.target === text) return; playSegment(seg); };
+    row.ondblclick = (e) => { if (text.contains(e.target)) return; playSegment(seg); };
     box.appendChild(row);
   }
-  if (state.filterSpeaker && !box.children.length) {
-    box.innerHTML = '<div class="empty">У этого спикера нет реплик</div>';
+  if (!box.children.length) {
+    if (state.onlyDoubtful || state.onlyChanged) {
+      box.innerHTML = '<div class="empty">Под этим фильтром реплик нет</div>';
+    } else if (state.filterSpeaker) {
+      box.innerHTML = '<div class="empty">У этого спикера нет реплик</div>';
+    }
   }
   // rows were rebuilt — re-apply the "now playing" frame
   state.activeId = null;
   state.activeHolding = false;
   highlightActiveSegment();
+  markCurrentWord();
   updateSearchCount(matches);
   renderFilterBar();
   renderSelBar();
+  renderResultBar();
 }
 
 /* --------------------------------------------------------------- selection */
@@ -3974,6 +4806,59 @@ function mergeSelectionInto(target) {
   renderChips(); renderSegments(); renderBookmarks(); drawWave();
 }
 
+/* Hotkeys 1–9 / 0 / N: act on the waveform range, the selected rows, or the
+   segment under the playhead — whichever is present. */
+function targetSegments() {
+  if (state.segSel.size) return selectedSegments();
+  const seg = activeOrHereSegment();
+  return seg ? [seg] : [];
+}
+function assignSegmentsToSpeaker(segs, target) {
+  if (!segs.length) return toast('Нет реплики для назначения');
+  if (segs.every((s) => s.speaker === target)) return toast(`Уже ${speakerName(target)}`);
+  snapshot();
+  for (const seg of segs) seg.speaker = target;
+  if (!(target in state.names)) state.names[target] = '';
+  if (!state.keep.includes(target) && !backgroundIds().has(target)) state.keep.push(target);
+  state.segSel.clear();
+  state.segSelAnchor = null;
+  syncSpeakersFromSegments();
+  markDirty();
+  renderChips(); renderSegments(); renderBookmarks(); drawWave();
+  toast(`Реплики → ${speakerName(target)}`);
+}
+function assignSpeakerByIndex(n) {
+  const target = assignableSpeakers()[n - 1];
+  if (!target) return toast('Такого спикера нет');
+  if (state.rangeSel) return assignRangeSpeaker(target);
+  assignSegmentsToSpeaker(targetSegments(), target);
+}
+function sendTargetToBackground() {
+  const segs = state.rangeSel
+    ? segmentsInRange(state.rangeSel.start, state.rangeSel.end)
+    : targetSegments();
+  if (!segs.length) return toast('Нет реплики для фона');
+  const ids = [...new Set(segs.map((s) => s.speaker))];
+  state.rangeSel = null;
+  renderRangeBar();
+  scopeBackgroundMark(ids);
+  toast(ids.length === 1 ? 'Спикер отправлен в фон' : 'Спикеры отправлены в фон');
+}
+function newSpeakerForTarget() {
+  const segs = state.rangeSel
+    ? segmentsInRange(state.rangeSel.start, state.rangeSel.end)
+    : targetSegments();
+  if (!segs.length) return toast('Нет реплики для нового спикера');
+  let n = 1;
+  while (state.speakers.includes('SPEAKER_NEW' + n)) n++;
+  const label = 'SPEAKER_NEW' + n;
+  state.names[label] = '';
+  state.keep.push(label);
+  if (state.rangeSel) assignRangeSpeaker(label);
+  else assignSegmentsToSpeaker(segs, label);
+  focusChipName(label);
+}
+
 /* "Выбрать все реплики SPEAKER_NN": a small chooser mirroring the reassign popup. */
 function showSelectAllSpeakersPopup(anchor) {
   const existing = document.getElementById('reassign-pop');
@@ -4065,13 +4950,29 @@ function renderFilterBar() {
   bar.appendChild(clear);
 }
 
+/* Play an interval, optionally starting a little earlier so the first
+   syllable is not clipped by the segment boundary. */
+function playRange(start, end, preRoll = 0) {
+  if (!audio.src) return;
+  clearLoop(true);
+  const from = Math.max(0, start - Math.max(0, preRoll || 0));
+  state.playUntil = end;
+  state.prerollUntil = preRoll ? start : null;
+  seek(from);
+  audio.play().catch(() => {});
+  $('btn-play').textContent = '❚❚';
+}
+
 /* Play just one segment's interval, then stop (dbl-click on a row). */
 function playSegment(seg) {
-  if (!audio.src) return;
-  seek(seg.start);
-  state.playUntil = seg.end;
-  audio.play();
-  $('btn-play').textContent = '❚❚';
+  playRange(seg.start, seg.end, 0.5);
+}
+
+/* Double-click on a word: play only that word, with a tiny lead-in. */
+function playWord(seg, index) {
+  const w = seg && seg.words && seg.words[index];
+  if (!w) return;
+  playRange(w.start, w.end, 0.15);
 }
 
 /* The segments the user currently sees (speaker filter applied). */
@@ -4365,6 +5266,7 @@ function restoreSnapshot(snap) {
   state.keep = snap.keep || [];
   state.match = snap.match || {};
   state.savedVoices = snap.savedVoices || state.savedVoices || {};
+  state.splitMark = null;   // undo/redo may restore a state without those rows
   pruneSelection();
   syncSpeakersFromSegments();   // the restored segments may drop or re-add speakers
   markDirty();
@@ -4392,14 +5294,99 @@ function redo() {
   if (current) { state.undo.push(current); if (state.undo.length > 40) state.undo.shift(); }
   restoreSnapshot(snap);
 }
+/* ---------------------------------------------------------------- word clock */
+/* Word timings saved with a segment give a cut an exact boundary: it lands on
+   the start of the word the caret points at, instead of guessing from the
+   character share of the duration. They are only trusted while the words
+   still spell the segment text — a typed edit makes them stale. Records
+   transcribed by older versions carry none and fall back to the guess. */
+function normalizeSpaces(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim();
+}
+function hasWordClock(seg) {
+  if (!seg || !Array.isArray(seg.words) || !seg.words.length) return false;
+  const spelled = seg.words.map((w) => (w && w.text) || '').join(' ');
+  return normalizeSpaces(spelled) === normalizeSpaces(seg.text);
+}
+function lettersOf(text) {
+  return String(text || '').replace(/\s+/g, '').length;
+}
+/* Index of the first word of the tail, or -1 when the caret sits inside a
+   word (no exact audio boundary exists there) or there is no word clock. */
+function tailWordIndex(seg, cut) {
+  if (!hasWordClock(seg)) return -1;
+  const before = lettersOf(seg.text.slice(0, cut));
+  let seen = 0;
+  for (let i = 0; i < seg.words.length; i++) {
+    if (seen === before) return i;
+    seen += lettersOf(seg.words[i].text);
+    if (seen > before) return -1;
+  }
+  return -1;
+}
+
+/* Word under a caret/character offset (spaces map to the next word). */
+function wordIndexAt(seg, cut) {
+  if (!hasWordClock(seg)) return -1;
+  const before = lettersOf(seg.text.slice(0, cut));
+  let seen = 0;
+  for (let i = 0; i < seg.words.length; i++) {
+    const n = lettersOf(seg.words[i].text);
+    if (before < seen + n) return i;
+    seen += n;
+  }
+  return before >= seen ? seg.words.length - 1 : -1;
+}
+/* HTML for a segment that carries word timings: every whitespace-separated
+   token becomes a span, so a click can seek to it and playback can highlight
+   it. The original text (including its spacing) is preserved. */
+function wordHtml(seg) {
+  if (!hasWordClock(seg)) return null;
+  const parts = String(seg.text || '').split(/(\s+)/);
+  let wi = 0, out = '';
+  for (const part of parts) {
+    if (!part) continue;
+    if (/^\s+$/.test(part)) { out += escapeHtml(part); continue; }
+    if (wi >= seg.words.length) return null;
+    out += `<span class="w" data-w="${wi}">${escapeHtml(part)}</span>`;
+    wi++;
+  }
+  return wi === seg.words.length ? out : null;
+}
+function segmentAtTime(t) {
+  if (!state.current) return null;
+  return state.current.segments.find((s) => t >= s.start && t < s.end) || null;
+}
+/* Chips that can receive a segment, in the same order as the visible 1–9
+   hints: background labels are excluded. */
+function assignableSpeakers() {
+  const bg = backgroundIds();
+  return state.speakers.filter((id) => !bg.has(id));
+}
+/* The segment a keyboard action should act on: the active one, else the one
+   under the playhead, else the nearest one ahead. */
+function activeOrHereSegment() {
+  if (!state.current) return null;
+  const list = state.current.segments;
+  let seg = list.find((s) => s.id === state.activeId);
+  if (seg) return seg;
+  seg = segmentAtTime(audio.currentTime || 0);
+  if (seg) return seg;
+  return list.find((s) => s.start >= (audio.currentTime || 0)) || list[list.length - 1] || null;
+}
+
 function mergeIntoPrevious(seg) {
   const list = state.current.segments;
   const i = list.indexOf(seg);
   if (i <= 0) return toast('Это первая реплика — подклеивать не к чему');
   snapshot();
   const prev = list[i - 1];
+  const keepWords = hasWordClock(prev) && hasWordClock(seg);
   prev.text = (prev.text + ' ' + seg.text).trim();
   prev.end = Math.max(prev.end, seg.end);
+  // the word clock survives only when both halves still carried one
+  if (keepWords) prev.words = prev.words.concat(seg.words);
+  else delete prev.words;
   // the merged segment keeps the previous speaker and its colour
   if (seg.bookmark) prev.bookmark = true;
   list.splice(i, 1);
@@ -4426,23 +5413,34 @@ function splitSegment(seg, textEl) {
   snapshot();
   const idx = state.current.segments.indexOf(seg);
   const originalEnd = seg.end;
-  // proportional cut: the caret position in the text maps to the same
-  // fraction of the segment duration, so the boundary lands near the
-  // phrase change instead of always in the middle
+  // exact boundary when the record carries word timings: the cut lands on the
+  // start of the word under the caret. Older records have none — keep the
+  // proportional guess, but say so: it can miss a long phrase by seconds, and
+  // the boundary is drawn on the wave for the user to pull onto the right spot.
+  const wordIdx = tailWordIndex(seg, snapped);
   const frac = Math.min(0.9, Math.max(0.1, snapped / Math.max(full.length, 1)));
-  const cutSec = seg.start + (originalEnd - seg.start) * frac;
+  const cutSec = wordIdx >= 0
+    ? Math.min(originalEnd - 0.02, Math.max(seg.start + 0.02, seg.words[wordIdx].start))
+    : seg.start + (originalEnd - seg.start) * frac;
+  const allWords = wordIdx >= 0 ? seg.words : [];
   seg.text = head;
   seg.end = cutSec;
+  if (wordIdx >= 0) seg.words = allWords.slice(0, wordIdx);
+  else delete seg.words;
+  const tailId = Math.random().toString(36).slice(2, 10);
   state.current.segments.splice(idx + 1, 0, {
-    id: Math.random().toString(36).slice(2, 10),
+    id: tailId,
     start: cutSec,
     end: originalEnd,
     speaker: seg.speaker,
     text: tail,
     bookmark: false,
+    words: wordIdx >= 0 ? allWords.slice(wordIdx) : [],
   });
+  state.splitMark = { head: seg.id, tail: tailId, time: cutSec };
   state.caret = {};
   markDirty(); renderSegments(); drawWave();
+  if (wordIdx < 0) toast('Граница по доле текста — подтяните её на волне мышью');
 }
 
 /* Nearest word boundary for a caret offset strictly inside the text: the
@@ -4460,6 +5458,121 @@ function snapCutToWord(text, cut) {
   if (canForward && (!canBack || forward - cut <= cut - back)) return forward;
   if (canBack) return back;
   return cut;
+}
+
+/* Split a segment at an absolute time without taking an undo snapshot; the
+   caller owns the single snapshot for a bulk operation. Returns the new tail. */
+function splitSegmentAtTime(seg, t) {
+  if (!seg || t <= seg.start + 0.001 || t >= seg.end - 0.001) return null;
+  const originalEnd = seg.end;
+  let cutSec = t, headText = '', tailText = '';
+  let headWords = null, tailWords = null;
+  if (hasWordClock(seg)) {
+    const wi = seg.words.findIndex((w) => w.start >= t - 0.001);
+    if (wi <= 0 || wi >= seg.words.length) return null;
+    cutSec = seg.words[wi].start;
+    headWords = seg.words.slice(0, wi);
+    tailWords = seg.words.slice(wi);
+    headText = headWords.map((w) => w.text).join(' ');
+    tailText = tailWords.map((w) => w.text).join(' ');
+  } else {
+    const ratio = (t - seg.start) / Math.max(seg.end - seg.start, 0.001);
+    const rough = Math.max(1, Math.min(seg.text.length - 1, Math.round(seg.text.length * ratio)));
+    const cut = snapCutToWord(seg.text, rough);
+    headText = seg.text.slice(0, cut).trim();
+    tailText = seg.text.slice(cut).trim();
+  }
+  if (!headText || !tailText) return null;
+  const tail = {
+    id: Math.random().toString(36).slice(2, 10),
+    start: cutSec,
+    end: originalEnd,
+    speaker: seg.speaker,
+    text: tailText,
+    bookmark: false,
+    words: tailWords || [],
+  };
+  seg.text = headText;
+  seg.end = cutSec;
+  if (headWords) seg.words = headWords;
+  else delete seg.words;
+  const idx = state.current.segments.indexOf(seg);
+  if (idx < 0) return null;
+  state.current.segments.splice(idx + 1, 0, tail);
+  return tail;
+}
+
+/* Highlight the word under the playhead (karaoke). Only rows rendered with
+   word spans have anything to mark; a row being edited is plain text. */
+function markCurrentWord() {
+  for (const el of document.querySelectorAll('#segments .txt .w-now')) {
+    el.classList.remove('w-now');
+  }
+  if (!state.current || !state.current.segments.length) return;
+  const seg = segmentAtTime(audio.currentTime || 0);
+  if (!seg || !hasWordClock(seg)) return;
+  const t = audio.currentTime || 0;
+  let wi = seg.words.findIndex((w) => t >= w.start && t < w.end);
+  if (wi < 0) {
+    for (let i = 0; i < seg.words.length; i++) {
+      if (seg.words[i].start <= t) wi = i;
+    }
+  }
+  if (wi < 0) return;
+  const row = [...document.querySelectorAll('#segments .seg')].find((r) => r.dataset.id === seg.id);
+  const span = row && row.querySelector(`.txt .w[data-w="${wi}"]`);
+  if (span) span.classList.add('w-now');
+}
+
+/* Why a segment is worth a second look. Honest signals only: very short
+   utterances and rows the last speakers-only reprocess moved. */
+function doubtfulReason(seg) {
+  const reasons = [];
+  if (seg.reviewed) return reasons;
+  if (seg.end - seg.start > 0 && seg.end - seg.start < 1.2) reasons.push('короткая реплика');
+  if (state.diffIds && state.diffIds.has(seg.id)) reasons.push('изменилась после переобработки');
+  return reasons;
+}
+
+/* How many changed rows still need a human look.  A row confirmed in the
+   «Разобрать спорные» queue is no longer doubtful even though the reprocess
+   diff still remembers it. */
+function unreviewedDiffIds() {
+  if (!state.current || !state.diffIds) return [];
+  const byId = new Map(state.current.segments.map(seg => [seg.id, seg]));
+  return [...state.diffIds].filter(id => {
+    const seg = byId.get(id);
+    return seg && !seg.reviewed;
+  });
+}
+
+/* Typing in a segment should not fight with playback. */
+function pauseForTyping() {
+  if (audio.paused) return;
+  audio.pause();
+  $('btn-play').textContent = '▶';
+}
+
+/* ---- looping the current segment (L) ---- */
+function setLoopIndicator() {
+  const btn = $('btn-loop');
+  if (btn) btn.classList.toggle('active', !!state.loop);
+}
+function clearLoop(silent = false) {
+  if (!state.loop) return;
+  state.loop = null;
+  setLoopIndicator();
+  if (!silent) toast('Повтор выключен');
+}
+function toggleLoop() {
+  if (!state.current) return;
+  const seg = activeOrHereSegment();
+  if (!seg) return toast('Нет реплики для повтора');
+  if (state.loop && state.loop.segId === seg.id) { clearLoop(); return; }
+  state.loop = { segId: seg.id, start: seg.start, end: seg.end };
+  state.playUntil = null;
+  setLoopIndicator();
+  toast('Повтор реплики включён · L или Esc — выключить');
 }
 
 function markDirty() {
@@ -4546,12 +5659,15 @@ function flushEdits() {
 }
 window.addEventListener('pagehide', flushEdits);
 window.addEventListener('beforeunload', flushEdits);
+window.addEventListener('pagehide', saveResume);
+window.addEventListener('beforeunload', saveResume);
 
 /* ------------------------------------------------------------------- player */
 function seek(t) {
   if (!audio.src) return;
   audio.currentTime = Math.max(0, t);
   drawWave();
+  markCurrentWord();
 }
 const MIN_WINDOW_SEC = 10;   // deepest zoom: a 10 s slice of the recording
 
@@ -4660,6 +5776,64 @@ function drawWave() {
     }
   }
 
+  // Shift+drag range: a translucent band with solid edges, so the user sees
+  // exactly which piece will get the chosen speaker.
+  if (state.rangeSel) {
+    const a = Math.max(0, Math.min(X(state.rangeSel.start), X(state.rangeSel.end)));
+    const b = Math.min(w, Math.max(X(state.rangeSel.start), X(state.rangeSel.end)));
+    if (b > 0 && a < w) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(76,194,255,.16)';
+      ctx.fillRect(a, 0, Math.max(1, b - a), h);
+      ctx.fillStyle = '#4cc2ff';
+      ctx.fillRect(a, 0, 2, h);
+      ctx.fillRect(Math.max(0, b - 2), 0, 2, h);
+      ctx.restore();
+    }
+  }
+
+  // boundary of the last split: a dashed handle the user can drag. On records
+  // without word timings this guess can be seconds off, so it must be visible
+  // and grabbable right where it landed.
+  if (state.splitMark) {
+    if (!splitMarkPair()) {
+      state.splitMark = null;   // undo or a merge removed those rows
+    } else {
+      const x = X(state.splitMark.time);
+      if (x >= -8 && x <= w + 8) {
+        ctx.save();
+        ctx.strokeStyle = '#4cc2ff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#4cc2ff';
+        ctx.beginPath();
+        ctx.moveTo(x - 7, 0); ctx.lineTo(x + 7, 0); ctx.lineTo(x, 9);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  // any other boundary, while being dragged: orange dashed handle
+  if (state.boundaryMark) {
+    const x = X(state.boundaryMark.time);
+    if (x >= -8 && x <= w + 8) {
+      ctx.save();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.moveTo(x - 7, 0); ctx.lineTo(x + 7, 0); ctx.lineTo(x, 9);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // playhead (only while it is inside the window)
   if (audio.currentTime) {
     const x = X(audio.currentTime);
@@ -4676,6 +5850,12 @@ function drawWave() {
    Far from any boundary the exact position is kept, so seeking inside a long
    monologue still works. */
 $('wave').onclick = (e) => {
+  if (splitClickGuard) { splitClickGuard = false; return; }
+  if (state.rangeSel) {
+    state.rangeSel = null;
+    renderRangeBar();
+    drawWave();
+  }
   const rect = e.target.getBoundingClientRect();
   const [vs, ve] = viewWindow();
   const span = ve - vs;
@@ -4712,13 +5892,194 @@ $('wave').addEventListener('wheel', (e) => {
   }
 }, { passive: false });
 
+/* ------------------------------------------------ граница разреза на волне */
+/* The cut of the last split stays on the wave as a dashed handle. On records
+   without word timings the boundary is a guess that can be seconds off, so the
+   user can drag it onto the real phrase change; on new records it already sits
+   on a word and the handle only shows where the split landed. */
+function splitMarkPair() {
+  const mark = state.splitMark;
+  if (!mark || !state.current) return null;
+  const head = state.current.segments.find((s) => s.id === mark.head);
+  const tail = state.current.segments.find((s) => s.id === mark.tail);
+  return head && tail ? { head, tail, mark } : null;
+}
+function splitMarkX() {
+  if (!state.splitMark) return null;
+  const [vs, ve] = viewWindow();
+  return ((state.splitMark.time - vs) / Math.max(1e-6, ve - vs)) *
+    ($('wave').getBoundingClientRect().width || 1);
+}
+function splitMarkNear(clientX) {
+  const x = splitMarkX();
+  if (x == null) return false;
+  return Math.abs(clientX - $('wave').getBoundingClientRect().left - x) <= 7;
+}
+function splitMarkTimeAt(clientX) {
+  const rect = $('wave').getBoundingClientRect();
+  const [vs, ve] = viewWindow();
+  return vs + ((clientX - rect.left) / Math.max(1, rect.width)) * (ve - vs);
+}
+function moveSplitMark(t) {
+  const pair = splitMarkPair();
+  if (!pair) { clearSplitMark(); return; }
+  pair.mark.time = Math.min(pair.tail.end - 0.05,
+    Math.max(pair.head.start + 0.05, t));
+  drawWave();
+}
+function clearSplitMark() {
+  if (!state.splitMark) return;
+  state.splitMark = null;
+  drawWave();
+}
+function commitSplitMark() {
+  const pair = splitMarkPair();
+  if (!pair) { clearSplitMark(); return; }
+  const { head, tail, mark } = pair;
+  if (Math.abs(head.end - mark.time) < 0.004 && Math.abs(tail.start - mark.time) < 0.004) return;
+  head.end = mark.time;
+  tail.start = mark.time;
+  markDirty();
+  renderSegments();   // the time column must show the corrected boundary
+  drawWave();
+}
+
+/* ------------------------------------------- любая граница между репликами */
+/* Besides the last split, every boundary between two neighbouring segments is
+   grabbable. On records with word clocks the drop snaps to a word start and
+   the words/text are redistributed; on older records only the times move. */
+function boundaryAt(clientX) {
+  if (!state.current) return null;
+  const rect = $('wave').getBoundingClientRect();
+  const [vs, ve] = viewWindow();
+  const span = ve - vs;
+  const list = state.current.segments;
+  for (let i = 1; i < list.length; i++) {
+    const head = list[i - 1], tail = list[i];
+    const time = tail.start;
+    if (time < vs - 1 || time > ve + 1) continue;
+    const x = rect.left + ((time - vs) / Math.max(1e-6, span)) * rect.width;
+    if (Math.abs(clientX - x) <= 7) return { head, tail, time };
+  }
+  return null;
+}
+function boundaryPair() {
+  const mark = state.boundaryMark;
+  if (!mark || !state.current) return null;
+  const head = state.current.segments.find((s) => s.id === mark.head);
+  const tail = state.current.segments.find((s) => s.id === mark.tail);
+  return head && tail ? { head, tail, mark } : null;
+}
+function boundarySnap(pair, t) {
+  const { head, tail } = pair;
+  const low = head.start + 0.05, high = tail.end - 0.05;
+  t = Math.min(high, Math.max(low, t));
+  if (!hasWordClock(head) || !hasWordClock(tail)) return { time: t, wordIdx: -1 };
+  const all = head.words.concat(tail.words);
+  let best = -1, bestDist = Infinity;
+  for (let i = 1; i < all.length; i++) {
+    const d = Math.abs(all[i].start - t);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  if (best < 0) return { time: t, wordIdx: -1 };
+  return { time: all[best].start, wordIdx: best };
+}
+function moveBoundaryMark(t) {
+  const pair = boundaryPair();
+  if (!pair) { clearBoundaryMark(); return; }
+  const snap = boundarySnap(pair, t);
+  pair.mark.time = snap.time;
+  pair.mark.wordIdx = snap.wordIdx;
+  drawWave();
+}
+function clearBoundaryMark() {
+  if (!state.boundaryMark) return;
+  state.boundaryMark = null;
+  drawWave();
+}
+function commitBoundaryMark() {
+  const pair = boundaryPair();
+  state.boundaryMark = null;
+  if (!pair) { drawWave(); return; }
+  const { head, tail, mark } = pair;
+  const snap = boundarySnap(pair, mark.time);
+  if (Math.abs(head.end - snap.time) < 0.004 && Math.abs(tail.start - snap.time) < 0.004) {
+    drawWave();
+    return;
+  }
+  snapshot();
+  let redistributed = false;
+  if (snap.wordIdx > 0 && hasWordClock(head) && hasWordClock(tail)) {
+    const all = head.words.concat(tail.words);
+    const idx = snap.wordIdx;
+    head.words = all.slice(0, idx);
+    tail.words = all.slice(idx);
+    head.text = head.words.map((w) => w.text).join(' ');
+    tail.text = tail.words.map((w) => w.text).join(' ');
+    redistributed = true;
+  }
+  head.end = snap.time;
+  tail.start = snap.time;
+  markDirty();
+  renderSegments();
+  drawWave();
+  if (!redistributed) toast('Граница сдвинута по времени — текст на части не разложен');
+}
+
 const waveDrag = { active: false, moved: false, x: 0, vs: 0, ve: 0 };
+const splitDrag = { active: false };
+const boundaryDrag = { active: false };
+const rangeDrag = { active: false, start: 0 };
+let splitClickGuard = false;
 $('wave').addEventListener('mousedown', (e) => {
+  if (splitMarkNear(e.clientX)) {
+    splitDrag.active = true;
+    e.preventDefault();   // no text selection while pulling the handle
+    return;
+  }
+  if (e.shiftKey) {
+    rangeDrag.active = true;
+    rangeDrag.start = splitMarkTimeAt(e.clientX);
+    state.rangeSel = null;
+    state.boundaryMark = null;
+    e.preventDefault();
+    drawWave();
+    return;
+  }
+  const near = boundaryAt(e.clientX);
+  if (near) {
+    boundaryDrag.active = true;
+    state.boundaryMark = { head: near.head.id, tail: near.tail.id, time: near.time, wordIdx: -1 };
+    e.preventDefault();
+    drawWave();
+    return;
+  }
   waveDrag.active = true; waveDrag.moved = false;
   waveDrag.x = e.clientX;
   [waveDrag.vs, waveDrag.ve] = viewWindow();
 });
+$('wave').addEventListener('mousemove', (e) => {
+  if (splitDrag.active || boundaryDrag.active || rangeDrag.active || waveDrag.active) return;
+  $('wave').style.cursor = (splitMarkNear(e.clientX) || boundaryAt(e.clientX)) ? 'ew-resize' : '';
+});
+/* Leaving the canvas with the pointer over the handle must not keep the
+   resize cursor: hand the wave back to its normal click-to-seek look. */
+$('wave').addEventListener('mouseleave', () => {
+  if (splitDrag.active || boundaryDrag.active || rangeDrag.active || waveDrag.active) return;
+  $('wave').style.cursor = '';
+});
 window.addEventListener('mousemove', (e) => {
+  if (splitDrag.active) { moveSplitMark(splitMarkTimeAt(e.clientX)); return; }
+  if (boundaryDrag.active) { moveBoundaryMark(splitMarkTimeAt(e.clientX)); return; }
+  if (rangeDrag.active) {
+    const t = splitMarkTimeAt(e.clientX);
+    state.rangeSel = {
+      start: Math.min(rangeDrag.start, t),
+      end: Math.max(rangeDrag.start, t),
+    };
+    drawWave();
+    return;
+  }
   if (!waveDrag.active) return;
   const rect = $('wave').getBoundingClientRect();
   const w = rect.width || 1;
@@ -4726,12 +6087,131 @@ window.addEventListener('mousemove', (e) => {
   if (Math.abs(e.clientX - waveDrag.x) > 4) waveDrag.moved = true;
   if (waveDrag.moved) setView(waveDrag.vs - shift, waveDrag.ve - shift);
 });
-window.addEventListener('mouseup', () => { waveDrag.active = false; });
-$('wave').addEventListener('dblclick', () => { state.view = null; drawWave(); });
+window.addEventListener('mouseup', () => {
+  waveDrag.active = false;
+  if (splitDrag.active) {
+    splitDrag.active = false;
+    $('wave').style.cursor = '';
+    commitSplitMark();
+    splitClickGuard = true;   // the release must not also seek
+  }
+  if (boundaryDrag.active) {
+    boundaryDrag.active = false;
+    $('wave').style.cursor = '';
+    commitBoundaryMark();
+    splitClickGuard = true;
+  }
+  if (rangeDrag.active) {
+    rangeDrag.active = false;
+    if (state.rangeSel && state.rangeSel.end - state.rangeSel.start < 0.15) state.rangeSel = null;
+    renderRangeBar();
+    drawWave();
+    splitClickGuard = true;
+  }
+});
+$('wave').addEventListener('dblclick', () => {
+  state.view = null;
+  state.rangeSel = null;
+  state.boundaryMark = null;
+  renderRangeBar();
+  drawWave();
+});
+
+/* --------------------------------------------------- диапазон на волне */
+function segmentsInRange(start, end) {
+  if (!state.current) return [];
+  return state.current.segments.filter((s) => s.end > start + 0.001 && s.start < end - 0.001);
+}
+function canSplitAtTime(seg, t) {
+  if (t <= seg.start + 0.001 || t >= seg.end - 0.001) return false;
+  if (!hasWordClock(seg)) return seg.text.length > 1;
+  const wi = seg.words.findIndex((w) => w.start >= t - 0.001);
+  return wi > 0 && wi < seg.words.length;
+}
+function renderRangeBar() {
+  const bar = $('range-bar');
+  if (!bar) return;
+  if (!state.rangeSel || !state.current) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  const { start, end } = state.rangeSel;
+  const covered = segmentsInRange(start, end);
+  bar.innerHTML = '';
+  const label = document.createElement('span');
+  label.textContent = `Диапазон ${fmt(start)}–${fmt(end)} · реплик: ${covered.length}`;
+  bar.appendChild(label);
+  const hint = document.createElement('span');
+  hint.className = 'range-hint';
+  hint.textContent = 'назначить:';
+  bar.appendChild(hint);
+  const ids = assignableSpeakers();
+  ids.slice(0, 9).forEach((id, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const key = document.createElement('span');
+    key.className = 'range-key';
+    key.textContent = String(i + 1);
+    const dot = document.createElement('span');
+    dot.className = 'range-dot';
+    dot.style.background = speakerColor(id);
+    btn.appendChild(key);
+    btn.appendChild(dot);
+    btn.appendChild(document.createTextNode(speakerName(id)));
+    btn.onclick = () => assignRangeSpeaker(id);
+    bar.appendChild(btn);
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'Снять';
+  cancel.onclick = () => { state.rangeSel = null; renderRangeBar(); drawWave(); };
+  bar.appendChild(cancel);
+  bar.classList.remove('hidden');
+}
+function assignRangeSpeaker(target) {
+  if (!state.rangeSel || !state.current) return;
+  const { start, end } = state.rangeSel;
+  const originals = state.current.segments.slice();
+  const plans = [];
+  let skipped = 0;
+  for (const seg of originals) {
+    if (seg.end <= start + 0.001 || seg.start >= end - 0.001) continue;
+    const needStart = seg.start < start - 0.001;
+    const needEnd = seg.end > end + 0.001;
+    if ((needStart && !canSplitAtTime(seg, start)) || (needEnd && !canSplitAtTime(seg, end))) {
+      skipped++;
+      continue;
+    }
+    plans.push({ seg, needStart, needEnd });
+  }
+  if (!plans.length) {
+    return toast('Не удалось разрезать реплики по границам диапазона');
+  }
+  snapshot();
+  let changed = 0;
+  for (const plan of plans) {
+    let piece = plan.seg;
+    if (plan.needStart) piece = splitSegmentAtTime(piece, start) || null;
+    if (!piece || (plan.needEnd && !splitSegmentAtTime(piece, end))) continue;
+    piece.speaker = target;
+    changed++;
+  }
+  if (!(target in state.names)) state.names[target] = '';
+  state.rangeSel = null;
+  syncSpeakersFromSegments();
+  markDirty();
+  renderChips(); renderSegments(); renderBookmarks(); drawWave(); renderRangeBar();
+  toast(`Диапазон → ${speakerName(target)}` + (skipped ? ` · ${skipped} реплик не разрезать` : ''));
+}
 
 function togglePlayback() {
   state.playUntil = null;
+  state.prerollUntil = null;
   if (audio.paused) {
+    if (state.loop && (audio.currentTime < state.loop.start || audio.currentTime >= state.loop.end)) {
+      audio.currentTime = state.loop.start;
+    }
     soloSeekIntoView();
     audio.play().catch(() => {});
     $('btn-play').textContent = '❚❚';
@@ -4741,7 +6221,16 @@ function togglePlayback() {
   }
 }
 $('btn-play').onclick = togglePlayback;
-audio.onended = () => { $('btn-play').textContent = '▶'; $('video-el').pause(); broadcastPlayerState(); };
+audio.onended = () => {
+  if (state.loop) {
+    audio.currentTime = state.loop.start;
+    audio.play().catch(() => {});
+    return;
+  }
+  $('btn-play').textContent = '▶';
+  $('video-el').pause();
+  broadcastPlayerState();
+};
 audio.addEventListener('play', soloSync);
 audio.addEventListener('pause', soloSync);
 
@@ -4793,6 +6282,15 @@ function setActiveSegmentId(id, holding = false) {
 // anything" without two bookmarks).
 
 audio.ontimeupdate = () => {
+  // loop the active segment (L): jump back before the playUntil stop fires
+  if (state.loop && !audio.paused && audio.currentTime >= state.loop.end) {
+    audio.currentTime = state.loop.start;
+    state.playUntil = null;
+    state.prerollUntil = null;
+  }
+  if (state.prerollUntil != null && audio.currentTime >= state.prerollUntil) {
+    state.prerollUntil = null;
+  }
   // single-segment playback (dbl-click a row): stop at the segment end
   if (state.playUntil != null && audio.currentTime >= state.playUntil) {
     state.playUntil = null;
@@ -4803,12 +6301,20 @@ audio.ontimeupdate = () => {
   $('t-dur').textContent = fmt(audio.duration || (state.current ? state.current.duration : 0));
   drawWave();
   highlightActiveSegment();
+  markCurrentWord();
   syncVideoFrame();
   broadcastPlayerState();
+  if (!audio.paused && Date.now() - resumeSavedAt > 5000) {
+    resumeSavedAt = Date.now();
+    saveResume();
+  }
 };
 audio.onloadedmetadata = () => {
   $('t-dur').textContent = fmt(audio.duration);
+  audio.playbackRate = state.playbackRate;
   drawWave();
+  applyResumePending();
+  markCurrentWord();
   syncVideoFrame(true);
 };
 $('speed').onchange = (e) => { setPlaybackRate(parseFloat(e.target.value)); };
@@ -4962,8 +6468,8 @@ function scheduleVideoSeek() {
 }
 
 audio.addEventListener('play', () => { syncVideoFrame(true); broadcastPlayerState(); });
-audio.addEventListener('pause', () => { syncVideoFrame(true); broadcastPlayerState(); });
-audio.addEventListener('seeked', scheduleVideoSeek);
+audio.addEventListener('pause', () => { syncVideoFrame(true); broadcastPlayerState(); saveResume(); });
+audio.addEventListener('seeked', () => { scheduleVideoSeek(); saveResume(); });
 audio.addEventListener('ratechange', () => { syncVideoFrame(); broadcastPlayerState(); });
 
 $('btn-video').onclick = () => setVideoPane(state.videoMode !== 'pane');
@@ -4971,8 +6477,10 @@ $('video-close').onclick = () => setVideoPane(false);
 
 function setPlaybackRate(rate) {
   const value = Math.min(2, Math.max(0.5, Number(rate) || 1));
+  state.playbackRate = value;
   audio.playbackRate = value;
   $('speed').value = String(value);
+  try { localStorage.setItem('nestor.speed', String(value)); } catch (err) { /* ignore */ }
   syncVideoFrame();
   broadcastPlayerState();
 }
@@ -5237,6 +6745,7 @@ async function upload(files, { autoStart = $('auto-start').checked } = {}) {
       form.append('vp_segment_agreement', vpAgreement);
       form.append('merge_speakers', mergeMinWeight > 0 ? 'true' : 'false');
       form.append('merge_min_weight', mergeMinWeight);
+      form.append('merge_attach_window', $('attach') && $('attach').checked ? ATTACH_WINDOW_ENABLED : 0);
       form.append('auto_start', run ? 'true' : 'false');
       drop.classList.add('over');
       dropBusy(label(file.name, 0));
@@ -5342,6 +6851,7 @@ const SETTINGS_CONTROLS = {
   'pin-performance':  { key: 'pin_performance',  kind: 'checked' },
   'merge-pills':  { key: 'merge_min_weight',     kind: 'pill' },
   'min-coh':      { key: 'merge_min_coh',        kind: 'min-coh' },
+  'attach':       { key: 'merge_attach_window',  kind: 'attach-window' },
   'threads':      { key: 'threads',              kind: 'int-or-empty' },
   'glossary':     { key: 'glossary',             kind: 'checked' },
 };
@@ -5352,6 +6862,11 @@ let settingsSaveTimer = null;
 // its segments to the group centroid). 0.7 keeps clearly mixed blobs apart
 // while not carving a normal speaker (see speaker_merge / the diagnostics).
 const MIN_COH_ENABLED = 0.7;
+// value written for merge_attach_window when the "пришивать осколки" toggle is
+// on: an embedding-less label is folded into a neighbour speaking within this
+// many seconds. Measured on long recordings: 2 s already folds in 11 of 13
+// shells (at 3 s the same 11), so 2 s is the honest default.
+const ATTACH_WINDOW_ENABLED = 2.0;
 
 function settingsPayload() {
   // what the controls hold now, minus what the server already has
@@ -5368,6 +6883,7 @@ function settingsPayload() {
     if (spec.kind === 'checked') value = el.checked;
     else if (spec.kind === 'pill') value = parseFloat(el.dataset.value);
     else if (spec.kind === 'min-coh') value = el.checked ? MIN_COH_ENABLED : 0.0;
+    else if (spec.kind === 'attach-window') value = el.checked ? ATTACH_WINDOW_ENABLED : 0.0;
     else if (spec.kind === 'int-or-empty') {
       value = el.value === '' ? 0 : parseInt(el.value, 10) || 0;
     } else value = el.value;
@@ -5430,6 +6946,7 @@ function applySettingsToControls() {
       setPillValue(el, serverSettings.merge_speakers === false ? 0 : v);
     },
     merge_min_coh: (v) => { const el = $('min-coh'); if (el) el.checked = (v || 0) > 0; },
+    merge_attach_window: (v) => { const el = $('attach'); if (el) el.checked = (v || 0) > 0; },
   };
   for (const [key, value] of Object.entries(serverSettings)) {
     if (map[key]) map[key](value);
@@ -5712,6 +7229,10 @@ function showProcessDialog(rec, mode) {
       <div class="hint" id="pd-merge-hint"></div>
     </div>` : ''}
     <div class="field wide" style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <input type="checkbox" id="pd-attach" style="width:auto">
+      <span>Пришивать короткие осколки к соседнему голосу</span>
+    </div>
+    <div class="field wide" style="display:flex;align-items:center;gap:8px;margin-top:10px">
       <input type="checkbox" id="pd-match" style="width:auto">
       <span>Подставлять знакомые имена (людей: <span id="pd-vp-count">${(state.people || []).length}</span>)</span>
     </div>
@@ -5747,6 +7268,9 @@ function showProcessDialog(rec, mode) {
     group.addEventListener('click', (e) => setPill('pd-merge-pills', e.target));
   }
   $('pd-match').checked = job.match_voiceprints !== false;
+  if ($('pd-attach')) {
+    $('pd-attach').checked = (job.merge_attach_window || 0) > 0;
+  }
   $('pd-vp-count').textContent = (state.people || []).length;
   $('modal').classList.remove('hidden');
   const close = () => {
@@ -5765,6 +7289,9 @@ function showProcessDialog(rec, mode) {
       const weight = parseFloat($('pd-merge-pills').dataset.value) || 0;
       options.merge_min_weight = weight;
       options.merge_speakers = weight > 0;
+    }
+    if ($('pd-attach')) {
+      options.merge_attach_window = $('pd-attach').checked ? ATTACH_WINDOW_ENABLED : 0;
     }
     close();
     // flush pending edits first (for 'speakers' they must be part of the
@@ -7334,6 +8861,7 @@ $('btn-glossary').onclick = async () => {
 $('merge-pills').addEventListener('click', (e) => setPill('merge-pills', e.target));
 // the "строгая склейка" toggle saves like the other settings controls
 $('min-coh').addEventListener('change', scheduleSettingsSave);
+$('attach').addEventListener('change', scheduleSettingsSave);
 
 function setPill(groupId, button) {
   if (!button || !button.dataset.value) return;
@@ -7373,15 +8901,51 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (confirmDismiss) confirmDismiss();  // resolve a pending confirm as "no"
+    if (state.review) state.review = null;
     $('modal').classList.add('hidden');
     $('export-menu').classList.add('hidden');
     hideJobMenu();
     if (state.bgPickMode) { toggleBgPick(false); return; }
+    if (state.loop) { clearLoop(); return; }
+    if (state.rangeSel) { state.rangeSel = null; renderRangeBar(); drawWave(); return; }
+    if (state.boundaryMark) { clearBoundaryMark(); return; }
     if (state.segSel.size) { clearSegmentSelection(); return; }
+    if (state.splitMark) { clearSplitMark(); return; }
     if (state.filterSpeaker) setSpeakerFilter(null);
     return;
   }
   if (editing) return;
+
+  const modalOpen = !$('modal').classList.contains('hidden');
+  if (modalOpen && state.review && state.review.kind === 'segments' && !mod) {
+    if (e.key >= '1' && e.key <= '9' && e.key.length === 1) {
+      const target = assignableSpeakers()[Number(e.key) - 1];
+      if (!target) return toast('Нет голоса с таким номером');
+      e.preventDefault();
+      reviewSegmentCommit(target);
+      return;
+    }
+    if (e.key === 'Enter') {
+      const seg = segmentReviewCurrent();
+      if (seg) { e.preventDefault(); reviewSegmentCommit(seg.speaker); }
+      return;
+    }
+    if (e.key === 's' || e.key === 'S') {
+      e.preventDefault();
+      reviewSegmentSkip();
+      return;
+    }
+  }
+  if (!modalOpen && !mod) {
+    if (e.key >= '1' && e.key <= '9' && e.key.length === 1) {
+      e.preventDefault();
+      assignSpeakerByIndex(Number(e.key));
+      return;
+    }
+    if (e.key === '0') { e.preventDefault(); sendTargetToBackground(); return; }
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); newSpeakerForTarget(); return; }
+    if (e.key === 'l' || e.key === 'L') { e.preventDefault(); toggleLoop(); return; }
+  }
 
   if (e.key === ' ') { e.preventDefault(); $('btn-play').click(); }
   if (e.key === 'ArrowLeft') { e.preventDefault(); seek((audio.currentTime || 0) - 5); }
@@ -7402,6 +8966,7 @@ function escapeHtml(text) {
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 async function boot() {
+  $('speed').value = String(state.playbackRate);
   tvLoadPrefs();   // restore table sort/columns + rail filter saved by the user
   // show the app version unobtrusively at the bottom of the records rail
   try {

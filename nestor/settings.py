@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SETTINGS_FILE = "settings.json"
 
 # key -> (kind, constraint); anything not listed here is ignored on update.
@@ -44,6 +44,12 @@ SCHEMA: Dict[str, Tuple[str, object]] = {
     # strict-cohesion guard for the merge pass (opt-in, 0 = off): refuse merges
     # that would leave the group internally inhomogeneous
     "merge_min_coh": ("float", (0.0, 1.0)),
+    # labels too short to embed (no centroid at all) are attached to the voice
+    # speaking within this many seconds; 0 = leave them as one-utterance labels
+    "merge_attach_window": ("float", (0.0, 30.0)),
+    # auto-split of a too-large, inhomogeneous cluster: needs at least this many
+    # segment embeddings before it is even considered; 0 = off
+    "merge_split_min_segments": ("int", (0, 5000)),
     # audio enhancement before ASR (highpass + level normalization)
     "audio_enhance": ("bool", None),
     # diarization clustering (sherpa distance threshold; 0.5 = sherpa default)
@@ -86,6 +92,8 @@ DEFAULTS: Dict[str, object] = {
     "merge_min_weight": 1.5,
     "merge_segment_floor": 0.5,
     "merge_min_coh": 0.0,
+    "merge_attach_window": 2.0,
+    "merge_split_min_segments": 50,
     "audio_enhance": True,
     "diar_threshold": 0.5,
     "diar_min_duration_on": 0.5,
@@ -182,6 +190,10 @@ class SettingsStore:
         Measurements on real recordings showed 0.35 folded a two-person talk
         into a single label holding 71% of the words, while 0.5 keeps the
         voices apart; files written earlier carry the old value explicitly.
+
+        4 -> 5: two diarization post-passes were added (``merge_attach_window``
+        for labels that got no embedding at all, and ``merge_split_min_segments``
+        exposed as a setting); older files just take the new defaults.
         """
         if from_version < 2:
             self._data["diar_threshold"] = DEFAULTS["diar_threshold"]
@@ -190,6 +202,9 @@ class SettingsStore:
             self._data["merge_min_coh"] = DEFAULTS["merge_min_coh"]
         if from_version < 4:
             self._data["merge_segment_floor"] = DEFAULTS["merge_segment_floor"]
+        if from_version < 5:
+            self._data["merge_attach_window"] = DEFAULTS["merge_attach_window"]
+            self._data["merge_split_min_segments"] = DEFAULTS["merge_split_min_segments"]
         with self._lock:
             self._write()
 

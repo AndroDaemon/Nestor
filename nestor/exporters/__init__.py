@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ..config import Config
 from ..types import Transcript
@@ -25,6 +25,37 @@ def _registry() -> Dict[str, Exporter]:
         "docx": docx_export.export,
         "vtt": vtt_export.export,
     }
+
+
+def format_talk(seconds: float) -> str:
+    """H:MM:SS / M:SS for talk-time summaries in exports."""
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def talk_stats(transcript: Transcript) -> Tuple[float, List[dict]]:
+    """Per-speaker talk time, share, turn count, average and longest turn."""
+    by: Dict[str, dict] = {}
+    total = 0.0
+    for segment in transcript.segments:
+        dur = max(0.0, segment.end - segment.start)
+        if dur <= 0:
+            continue
+        who = segment.speaker or "?"
+        item = by.setdefault(who, {"speaker": who, "seconds": 0.0, "turns": 0, "longest": 0.0})
+        item["seconds"] += dur
+        item["turns"] += 1
+        item["longest"] = max(item["longest"], dur)
+        total += dur
+    rows = sorted(by.values(), key=lambda row: row["seconds"], reverse=True)
+    for row in rows:
+        row["share"] = row["seconds"] / total if total else 0.0
+        row["avg"] = row["seconds"] / row["turns"] if row["turns"] else 0.0
+    return total, rows
 
 
 def export_all(transcript: Transcript, config: Config) -> List[Path]:
@@ -79,4 +110,11 @@ def transcript_from_recording(recording, speaker_names: Optional[Dict[str, str]]
     )
 
 
-__all__ = ["export_all", "Exporter", "FORMATS", "transcript_from_recording"]
+__all__ = [
+    "export_all",
+    "Exporter",
+    "FORMATS",
+    "transcript_from_recording",
+    "format_talk",
+    "talk_stats",
+]

@@ -633,8 +633,8 @@ def test_speakers_mode_drops_names_when_split_changes(app, monkeypatch):
 
     recording = Recording(id="rec2", filename="b.wav", status="done")
     recording.segments = [
-        Segment("s1", 0.0, 1.5, "SPEAKER_00", "привет"),
-        Segment("s2", 2.0, 3.5, "SPEAKER_01", "пока"),
+        Segment("s1", 0.0, 1.5, "SPEAKER_00", "привет", reviewed=True),
+        Segment("s2", 2.0, 3.5, "SPEAKER_01", "пока", reviewed=True),
     ]
     recording.speaker_names = {"SPEAKER_00": "Иван", "SPEAKER_01": "Мария"}
     library.save(recording)
@@ -657,11 +657,33 @@ def test_speakers_mode_drops_names_when_split_changes(app, monkeypatch):
     assert _wait_for(lambda: library.load("rec2").status == "done")
 
     loaded = library.load("rec2")
+    # a moved row loses its "reviewed" mark; an untouched one keeps it
+    moved = {seg.id: seg.reviewed for seg in loaded.segments}
+    assert moved["s2"] is False, "reprocess invalidates a confirmed row"
+    assert moved["s1"] is True, "an unchanged row stays confirmed"
     # both utterances now belong to one voice; neither name describes it any more
     assert loaded.speaker_names == {}
     assert loaded.speakers == ["SPEAKER_00"]
     assert "сброшены имена" in (loaded.speakers_diff or "")
     assert "Иван" in loaded.speakers_diff and "Мария" in loaded.speakers_diff
+
+    # The speakers-only run leaves a reversible snapshot: the changed segment
+    # and both old labels are reported, and one call restores the split.
+    get = _endpoint(app, "GET", "/api/recordings/{record_id}")
+    undo = _endpoint(app, "POST", "/api/recordings/{record_id}/speakers/undo")
+    payload = get(record_id="rec2")
+    info = payload["reprocess_undo"]
+    assert info["available"] is True
+    assert info["failed"] is False
+    assert info["before_speakers"] == 2
+    assert info["after_speakers"] == 1
+    assert "s2" in info["changed"]
+
+    restored = undo(record_id="rec2")
+    assert restored["speakers"] == ["SPEAKER_00", "SPEAKER_01"]
+    assert restored["speaker_names"] == {"SPEAKER_00": "Иван", "SPEAKER_01": "Мария"}
+    assert restored["speakers_diff"] == "прежняя разбивка возвращена"
+    assert not (library.output_dir / "rec2" / "speakers-backup.json").exists()
 
 
 # ------------------------------------------------- cancellation & delete races

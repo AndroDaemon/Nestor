@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nestor"
-version = "1.6.0"
+version = "1.6.1"
 description = "Offline transcription and speaker diarization for Russian audio on CPU (GigaAM v3 punct + sherpa-onnx)."
 readme = "README.md"
 license = "MIT"

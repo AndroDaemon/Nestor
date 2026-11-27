@@ -88,6 +88,12 @@ class Config:
     # cut it in two when it is clearly two voices (see speaker_merge). Clusters
     # with fewer than this many segment embeddings are left alone; 0 = off.
     merge_split_min_segments: int = 50
+    # Untimed clusters (every utterance shorter than the embedding minimum) get
+    # no centroid and are invisible to the similarity merge; they are attached
+    # to the nearest voice within this many seconds instead. Measured on the
+    # real meeting recordings: 12 of 13 such labels had a speaker within 3s.
+    # 0 = off (leave the fragments as their own one-utterance labels).
+    merge_attach_window: float = 2.0
 
     # Glossary: rewrite recognised terms ("докер", "днс") to canonical form
     # ("Docker", "DNS"). Fully offline, deterministic, no speed impact.

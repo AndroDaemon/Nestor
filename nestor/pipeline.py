@@ -464,6 +464,18 @@ def process_file(
                     min_coh=config.merge_min_coh,
                     report=report,
                 )
+            # Phantom attach: a label whose every utterance is shorter than the
+            # embedding minimum has no centroid, so the similarity merge cannot
+            # see it at all. Attach those fragments to the voice speaking right
+            # next to them (nothing to compare by cosine - see speaker_merge).
+            if config.merge_attach_window > 0:
+                clusters, per_segment = speaker_merge.attach_untimed_clusters(
+                    segments,
+                    clusters,
+                    per_segment,
+                    window=config.merge_attach_window,
+                    report=report,
+                )
             # Auto-split: the merge pass above can chain a continuum of voices
             # into one huge cluster. Re-check the (now merged) clusters and cut
             # back the ones that are really two voices - the barrier is high, so

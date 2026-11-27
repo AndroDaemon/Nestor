@@ -48,6 +48,7 @@ __all__ = [
     "cosine",
     "normalise",
     "apply_to_segments",
+    "attach_untimed_clusters",
     "group_cohesion",
     "split_inhomogeneous_clusters",
 ]
@@ -416,6 +417,83 @@ def apply_to_segments(
                 f"  merged speakers: {', '.join(group)} -> {mapping[group[0]]}"
             )
     return new_clusters, new_segments
+
+
+# ------------------------------------------------------- untimed cluster attach
+# A label whose every utterance is shorter than the embedding minimum never
+# gets a centroid, so the merge pass cannot see it and it survives as a
+# one-utterance "speaker". On the real long recordings 12 of 13 such labels had
+# a genuine speaker talking within three seconds, so the closest voice in time
+# is attached instead of guessed by similarity (there is nothing to compare).
+ATTACH_WINDOW_SEC = 3.0
+
+
+def attach_untimed_clusters(
+    segments: Sequence,
+    clusters: Dict[str, Sequence[float]],
+    per_segment: Optional[Dict[str, List[Sequence[float]]]] = None,
+    window: float = ATTACH_WINDOW_SEC,
+    report: Optional[Callable[[str], None]] = None,
+) -> Tuple[Dict[str, list], Dict[str, list]]:
+    """Fold labels that never got an embedding into their temporal neighbour.
+
+    ``clusters`` holds a centroid only for labels with at least one utterance
+    long enough to embed; a label missing from it is a "phantom" (an um, a
+    cough, a half-word) that the similarity merge literally cannot see. Each
+    such label is attached to the nearest other label in time, but only when
+    the gap is at most ``window`` seconds - without a neighbour close enough the
+    label is left untouched, because there is no evidence to place it.
+
+    ``clusters`` / ``per_segment`` are returned unchanged: phantom labels never
+    had vectors to recombine.
+    """
+    if not segments or not clusters or window <= 0.0:
+        return clusters, per_segment or {}
+
+    spans: Dict[str, List[Tuple[float, float]]] = {}
+    for segment in segments:
+        label = str(segment.speaker)
+        spans.setdefault(label, []).append((float(segment.start), float(segment.end)))
+
+    phantoms = [label for label in spans if label not in clusters]
+    if not phantoms:
+        return clusters, per_segment or {}
+
+    # smallest first: a tiny fragment must not swallow a longer neighbour
+    phantoms.sort(key=lambda label: sum(end - start for start, end in spans[label]))
+
+    for label in phantoms:
+        own = spans.get(label)
+        if not own:
+            continue
+        low = min(start for start, _ in own)
+        high = max(end for _, end in own)
+        best_label = None
+        best_gap = float("inf")
+        for other, other_spans in spans.items():
+            if other == label or other not in clusters:
+                continue
+            for start, end in other_spans:
+                gap = max(0.0, max(start - high, low - end))
+                if gap < best_gap:
+                    best_gap = gap
+                    best_label = other
+        if best_label is None or best_gap > window:
+            if report is not None:
+                report(
+                    f"  attach {label}: no speaker within {window:.0f}s - left alone"
+                )
+            continue
+        for segment in segments:
+            if str(segment.speaker) == label:
+                segment.speaker = best_label
+                for word in getattr(segment, "words", []) or []:
+                    word.speaker = best_label
+        spans[best_label].extend(own)
+        spans.pop(label, None)
+        if report is not None:
+            report(f"  attached {label} -> {best_label} (gap {best_gap:.2f}s)")
+    return clusters, per_segment or {}
 
 
 # ---------------------------------------------------------- cluster cohesion

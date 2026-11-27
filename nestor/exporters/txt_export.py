@@ -13,7 +13,20 @@ def export(transcript: Transcript, path: Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = [
+    from . import format_talk, talk_stats
+
+    lines = []
+    stats_total, stats_rows = talk_stats(transcript)
+    if stats_rows:
+        lines.append(f"Речь по участникам (всего {format_talk(stats_total)}):")
+        for row in stats_rows:
+            lines.append(
+                f"  {row['speaker']}: {format_talk(row['seconds'])} "
+                f"({round(row['share'] * 100)}%), {row['turns']} реплик, "
+                f"средняя {format_talk(row['avg'])}, макс {format_talk(row['longest'])}"
+            )
+        lines.append("")
+    lines += [
         f"[{format_timestamp(segment.start)}] {segment.speaker}: {segment.text}"
         for segment in transcript.segments
         if segment.text.strip()

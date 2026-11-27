@@ -23,6 +23,19 @@ def export(transcript: Transcript, path: Path, speaker_names=None) -> Path:
     ]
     if transcript.diarization_model:
         lines.append(f"* Диаризация: {transcript.diarization_model}")
+    from . import format_talk, talk_stats
+
+    stats_total, stats_rows = talk_stats(transcript)
+    if stats_rows:
+        lines += ["", "## Речь по участникам", ""]
+        lines.append(f"Всего речи: {format_talk(stats_total)}")
+        lines.append("")
+        for row in stats_rows:
+            lines.append(
+                f"* **{row['speaker']}** — {format_talk(row['seconds'])} "
+                f"({round(row['share'] * 100)}%), {row['turns']} реплик, "
+                f"средняя {format_talk(row['avg'])}, макс {format_talk(row['longest'])}"
+            )
     lines += ["", "---", ""]
 
     for segment in transcript.segments:

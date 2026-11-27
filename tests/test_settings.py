@@ -123,6 +123,21 @@ def test_schema3_file_gets_the_raised_merge_floor(tmp_path):
     assert saved["schema_version"] == SCHEMA_VERSION
 
 
+def test_schema4_file_gains_the_phantom_attach_settings(tmp_path):
+    """A 1.6.0 file predates the phantom attach; the migration adds its keys."""
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"schema_version": 4, "num_speakers": 2}),
+        encoding="utf-8",
+    )
+    store = SettingsStore(tmp_path)
+    public = store.as_public()
+    assert public["merge_attach_window"] == DEFAULTS["merge_attach_window"]
+    assert public["merge_split_min_segments"] == DEFAULTS["merge_split_min_segments"]
+    assert public["num_speakers"] == 2  # other user values survive
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["schema_version"] == SCHEMA_VERSION
+
+
 def test_atomic_write_under_concurrency(tmp_path):
     """Parallel updates must not corrupt the file or lose both changes."""
     store = SettingsStore(tmp_path)

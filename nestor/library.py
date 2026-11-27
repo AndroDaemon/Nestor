@@ -44,6 +44,40 @@ def default_root() -> Path:
 
 
 @dataclass
+class WordStamp:
+    """Timing of one recognised word, absolute seconds from the file start.
+
+    Stored with the segment so a hand split can land on the word the user
+    picked in the text instead of guessing from the character count. Records
+    transcribed by older versions carry no timings and fall back to the guess.
+    """
+
+    text: str
+    start: float
+    end: float
+
+
+def _words_from_payload(raw: object) -> List[WordStamp]:
+    """Parse word timings from a manifest; malformed entries are skipped."""
+    if not isinstance(raw, list):
+        return []
+    words: List[WordStamp] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            start = float(item.get("start", 0.0))
+            end = float(item.get("end", start))
+        except (TypeError, ValueError):
+            continue
+        words.append(WordStamp(text=text, start=start, end=end))
+    return words
+
+
+@dataclass
 class Segment:
     """One utterance in the editable transcript."""
 
@@ -53,6 +87,10 @@ class Segment:
     speaker: str
     text: str = ""
     bookmark: bool = False
+    words: List[WordStamp] = field(default_factory=list)
+    #: the user confirmed this row in the «разобрать спорные» queue; a later
+    #: speakers-only reprocess clears it when the voice actually moves.
+    reviewed: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Segment":
@@ -63,6 +101,8 @@ class Segment:
             speaker=str(data.get("speaker", "SPEAKER_00")),
             text=str(data.get("text", "")),
             bookmark=bool(data.get("bookmark", False)),
+            words=_words_from_payload(data.get("words")),
+            reviewed=bool(data.get("reviewed", False)),
         )
 
 

@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from nestor.speaker_merge import (
+    attach_untimed_clusters,
     cosine,
     group_cohesion,
     merge_similar_clusters,
@@ -297,10 +298,19 @@ def test_min_coh_allows_a_genuinely_homogeneous_merge():
 class _Seg:
     """Minimal stand-in for :class:`nestor.library.Segment`."""
 
-    def __init__(self, speaker: str, start: float, end: float):
+    def __init__(self, speaker: str, start: float, end: float, words=None):
         self.speaker = speaker
         self.start = start
         self.end = end
+        self.words = words if words is not None else []
+
+
+class _Word:
+    def __init__(self, speaker: str, text: str = "x"):
+        self.speaker = speaker
+        self.text = text
+        self.start = 0.0
+        self.end = 0.0
 
 
 def _cluster_of(label: str, angles, spacing: float = 1.0):
@@ -381,3 +391,80 @@ def test_group_cohesion_edge_cases():
     assert group_cohesion([unit(0), unit(90)], 16) == pytest.approx(
         cosine(unit(0), normalise(np.asarray(unit(0)) + np.asarray(unit(90)))), abs=1e-6
     )
+
+
+# ------------------------------------------- phantom attach (labels with no voice)
+def test_attach_folds_a_phantom_into_its_temporal_neighbour():
+    """A label with no centroid (too short to embed) joins the speaker next to it."""
+    words = [_Word("SPEAKER_07"), _Word("SPEAKER_07")]
+    segments = [
+        _Seg("SPEAKER_00", 0.0, 5.0),
+        _Seg("SPEAKER_07", 5.4, 5.7, words),  # gap 0.4s - a cough in the room
+        _Seg("SPEAKER_01", 9.0, 12.0),
+    ]
+    clusters = {"SPEAKER_00": unit(0.0), "SPEAKER_01": unit(40.0)}
+    lines: list[str] = []
+
+    new_clusters, new_per_segment = attach_untimed_clusters(
+        segments, clusters, {"SPEAKER_00": [unit(0.0)], "SPEAKER_01": [unit(40.0)]},
+        window=3.0, report=lines.append,
+    )
+
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00", "SPEAKER_01"}
+    assert all(word.speaker == "SPEAKER_00" for word in words)
+    assert set(new_clusters) == {"SPEAKER_00", "SPEAKER_01"}
+    assert any("attached SPEAKER_07 -> SPEAKER_00" in line for line in lines)
+
+
+def test_attach_leaves_a_phantom_alone_when_nobody_is_close():
+    segments = [
+        _Seg("SPEAKER_00", 0.0, 5.0),
+        _Seg("SPEAKER_09", 60.0, 60.3),  # nobody within three seconds
+        _Seg("SPEAKER_01", 120.0, 124.0),
+    ]
+    clusters = {"SPEAKER_00": unit(0.0), "SPEAKER_01": unit(40.0)}
+    lines: list[str] = []
+
+    new_clusters, _ = attach_untimed_clusters(
+        segments, clusters, {}, window=3.0, report=lines.append
+    )
+
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00", "SPEAKER_09", "SPEAKER_01"}
+    assert set(new_clusters) == {"SPEAKER_00", "SPEAKER_01"}
+    assert any("left alone" in line for line in lines)
+
+
+def test_attach_window_zero_disables_the_pass():
+    segments = [_Seg("SPEAKER_00", 0.0, 5.0), _Seg("SPEAKER_07", 5.1, 5.3)]
+    clusters = {"SPEAKER_00": unit(0.0)}
+
+    new_clusters, new_per_segment = attach_untimed_clusters(
+        segments, clusters, {"SPEAKER_00": [unit(0.0)]}, window=0.0
+    )
+
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00", "SPEAKER_07"}  # untouched
+    assert set(new_clusters) == {"SPEAKER_00"}
+    assert set(new_per_segment) == {"SPEAKER_00"}
+
+
+def test_attach_ignores_labels_that_do_have_embeddings():
+    """Only phantoms move: a label with a centroid is never re-pointed."""
+    segments = [
+        _Seg("SPEAKER_00", 0.0, 5.0),
+        _Seg("SPEAKER_01", 5.1, 10.0),
+        _Seg("SPEAKER_07", 10.2, 10.4),  # phantom between two real labels
+    ]
+    clusters = {"SPEAKER_00": unit(0.0), "SPEAKER_01": unit(5.0)}
+
+    new_clusters, _ = attach_untimed_clusters(segments, clusters, {}, window=3.0)
+
+    assert {seg.speaker for seg in segments} == {"SPEAKER_00", "SPEAKER_01"}
+    assert set(new_clusters) == {"SPEAKER_00", "SPEAKER_01"}
+    # the nearer of the two real labels absorbed it
+    assert segments[2].speaker in {"SPEAKER_00", "SPEAKER_01"}
+
+
+def test_attach_empty_input_is_a_no_op():
+    assert attach_untimed_clusters([], {}, None) == ({}, {})
+    segments = [_Seg("SPEAKER_00", 0.0, 1.0)]
+    assert attach_untimed_clusters(segments, {}, None) == ({}, {})

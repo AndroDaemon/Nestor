@@ -23,7 +23,7 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import nestor.web.app as app_module  # noqa: E402
-from nestor.library import Library, Recording, Segment  # noqa: E402
+from nestor.library import Library, Recording, Segment, WordStamp  # noqa: E402
 
 
 def _endpoint(app, method: str, path: str):
@@ -275,3 +275,55 @@ def test_save_seeds_cache_so_poll_does_not_hit_disk(tmp_path, monkeypatch):
 
     monkeypatch.setattr(library, "_read_record_data", boom)
     assert library.list()[0].status == "running"
+
+
+# ------------------------------------------------- word timings (exact split)
+def test_word_timings_survive_a_save_and_load(tmp_path):
+    """The editor cuts a segment on a word and needs the word's own time."""
+    library = Library(tmp_path)
+    recording = Recording(id="rec1", filename="a.wav", status="done")
+    recording.segments = [
+        Segment(
+            "s1", 0.0, 3.0, "SPEAKER_00", "привет мир",
+            words=[WordStamp("привет", 0.2, 1.1), WordStamp("мир", 1.4, 2.6)],
+        ),
+    ]
+    library.save(recording)
+
+    loaded = library.load("rec1")
+    assert [(w.text, w.start, w.end) for w in loaded.segments[0].words] == [
+        ("привет", 0.2, 1.1),
+        ("мир", 1.4, 2.6),
+    ]
+
+
+def test_put_keeps_word_timings_and_drops_broken_ones(tmp_path):
+    library = Library(tmp_path)
+    app = app_module.create_app(work_dir=tmp_path)
+    library.save(Recording(id="rec1", filename="a.wav", status="done"))
+
+    _put(
+        app,
+        "rec1",
+        {
+            "segments": [
+                {
+                    "id": "s1",
+                    "start": 0,
+                    "end": 3,
+                    "speaker": "SPEAKER_00",
+                    "text": "привет мир",
+                    "words": [
+                        {"text": "привет", "start": 0.2, "end": 1.1},
+                        {"text": "", "start": 1.2, "end": 1.3},   # no text: skipped
+                        {"text": "мир", "start": "oops"},         # no time: skipped
+                    ],
+                },
+            ],
+            "speaker_names": {},
+            "speaker_keep": [],
+        },
+    )
+
+    words = library.load("rec1").segments[0].words
+    assert [(w.text, w.start, w.end) for w in words] == [("привет", 0.2, 1.1)]

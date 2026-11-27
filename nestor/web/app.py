@@ -60,7 +60,7 @@ from ..glossary import (
     save_glossary,
     upsert_term,
 )
-from ..library import Library, Recording, Segment
+from ..library import Library, Recording, Segment, WordStamp
 from ..pipeline import JobCancelled, process_file
 from ..settings import SettingsStore
 from ..types import Turn
@@ -681,6 +681,12 @@ class Processor:
                     end=segment.end,
                     speaker=segment.speaker,
                     text=segment.text,
+                    # exact word clock: the editor cuts a segment between words
+                    # and must not guess the boundary from the character count
+                    words=[
+                        WordStamp(text=word.text, start=word.start, end=word.end)
+                        for word in (getattr(segment, "words", None) or ())
+                    ],
                 )
                 for segment in transcript.segments
             ]
@@ -775,6 +781,52 @@ class Processor:
         before_counts = Counter(s.speaker for s in recording.segments if s.speaker)
         self._moved_segments = 0
         self._dropped_names: List[str] = []
+        # Before labels are touched, remember the old map.  A speakers-only run
+        # changes only `segment.speaker`, ids stay stable, so this sidecar is
+        # enough for a one-click rollback and for marking changed rows.
+        backup_path = _speakers_backup_path(self.library, recording.id)
+        backup: Dict[str, object] = {
+            "version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "before": {seg.id: seg.speaker for seg in recording.segments},
+            "segments": recording.to_dict()["segments"],
+            "structure": _structure_signature(recording.segments),
+            "names": dict(recording.speaker_names),
+            "keep": list(recording.speaker_keep),
+            "match": dict(recording.speaker_match),
+            "before_speakers": len(before_counts),
+        }
+        try:
+            _write_speakers_backup(backup_path, backup)
+        except OSError as exc:
+            self.library.log(f"speakers backup skipped ({recording.id}): {exc}")
+
+        def finish_backup(failed: bool) -> None:
+            """Fill in the result half of the rollback sidecar (best effort)."""
+            before_map = backup.get("before")
+            before_map = before_map if isinstance(before_map, dict) else {}
+            changed = [
+                seg.id
+                for seg in recording.segments
+                if before_map.get(seg.id) != seg.speaker
+            ]
+            backup.update(
+                {
+                    "after": {seg.id: seg.speaker for seg in recording.segments},
+                    "structure_after": _structure_signature(recording.segments),
+                    "changed": changed,
+                    "after_speakers": len(recording.speakers),
+                    "moved": self._moved_segments,
+                    "dropped_names": list(self._dropped_names),
+                    "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "failed": failed,
+                }
+            )
+            try:
+                _write_speakers_backup(backup_path, backup)
+            except OSError as exc:
+                self.library.log(f"speakers backup update failed ({recording.id}): {exc}")
+
         try:
             self.library.save(recording)
             self.library.log(f"start speakers-only {recording.filename}")
@@ -784,6 +836,8 @@ class Processor:
             recording.error = f"Не удалось сохранить статус записи: {exc}"
             with contextlib.suppress(OSError):
                 self.library.save(recording)
+            with contextlib.suppress(OSError):
+                backup_path.unlink(missing_ok=True)
             return
 
         def on_progress(fraction: float) -> bool:
@@ -934,6 +988,9 @@ class Processor:
                 new_label = new_labels[id(seg)]
                 if new_label != seg.speaker:
                     self._moved_segments += 1
+                    # the row was doubtful because of the old decision; the
+                    # review it may have had no longer applies.
+                    seg.reviewed = False
                 seg.speaker = new_label
             previous_names = dict(recording.speaker_names)
             recording.speaker_names = names
@@ -980,6 +1037,17 @@ class Processor:
                         for label in recording.speaker_keep
                         if label in {s.speaker for s in recording.segments}
                     ]
+                if config.merge_attach_window > 0:
+                    # fragments too short to embed have no centroid and would
+                    # stay as one-utterance labels; attach them to the voice
+                    # speaking right next to them (see speaker_merge)
+                    clusters, per_segment = speaker_merge.attach_untimed_clusters(
+                        recording.segments,
+                        clusters,
+                        per_segment,
+                        window=config.merge_attach_window,
+                        report=lambda line: self.library.log(line.strip()),
+                    )
                 # Auto-split: undoes a chained mega-cluster when it is really two
                 # voices (same high barrier as the full pipeline; see speaker_merge)
                 if config.merge_split_min_segments > 0:
@@ -1068,6 +1136,7 @@ class Processor:
                     "speakers-only dropped names (разбивка изменилась): "
                     + ", ".join(self._dropped_names)
                 )
+            finish_backup(False)
             self.library.save(recording)
             self.library.log(
                 f"done speakers-only {recording.filename}: "
@@ -1075,9 +1144,11 @@ class Processor:
             )
             self._maybe_notify(recording, "Готово: разбивка по спикерам")
         except JobCancelled:
+            finish_backup(True)
             self._mark_cancelled(recording)
             self.library.log(f"stopped {recording.filename} (speakers-only)")
         except Exception as exc:  # noqa: BLE001 - reported in the UI
+            finish_backup(True)
             recording.status = "error"
             recording.stage = "error"
             recording.error = str(exc)
@@ -1103,6 +1174,8 @@ class ProcessOptions(BaseModel):
     merge_min_weight: Optional[float] = None
     merge_segment_floor: Optional[float] = None
     merge_min_coh: Optional[float] = None
+    merge_attach_window: Optional[float] = None
+    merge_split_min_segments: Optional[int] = None
     audio_enhance: Optional[bool] = None
     diar_threshold: Optional[float] = None
     diar_min_duration_on: Optional[float] = None
@@ -1181,6 +1254,10 @@ def job_config(
         config.merge_segment_floor = float(chosen["merge_segment_floor"])
     if chosen.get("merge_min_coh") is not None:
         config.merge_min_coh = float(chosen["merge_min_coh"])
+    if chosen.get("merge_attach_window") is not None:
+        config.merge_attach_window = float(chosen["merge_attach_window"])
+    if chosen.get("merge_split_min_segments") is not None:
+        config.merge_split_min_segments = int(chosen["merge_split_min_segments"])
     if chosen.get("audio_enhance") is not None:
         config.audio_enhance = as_bool(chosen.get("audio_enhance"), True)
     if chosen.get("diar_threshold") is not None:
@@ -1221,6 +1298,42 @@ def _plural_ru(n: int, one: str, few: str, many: str) -> str:
     if 2 <= n <= 4:
         return few
     return many
+
+
+SPEAKERS_BACKUP_NAME = "speakers-backup.json"
+
+
+def _speakers_backup_path(library: Library, record_id: str) -> Path:
+    """Where a speakers-only run keeps the map needed for a one-click rollback."""
+    return library.output_dir / record_id / SPEAKERS_BACKUP_NAME
+
+
+def _structure_signature(segments) -> list:
+    """Identity of the transcript *without* speaker labels.
+
+    A rollback restores only ``segment.speaker``; text, ids and times must still
+    be the ones the reprocessed transcript had, otherwise the old map no longer
+    describes it (the user split, merged or edited rows).
+    """
+    return [
+        [seg.id, seg.text, round(float(seg.start), 3), round(float(seg.end), 3)]
+        for seg in segments
+    ]
+
+
+def _write_speakers_backup(path: Path, payload: Dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _load_speakers_backup(path: Path) -> Optional[Dict[str, object]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _notify_done(title: str, body: str) -> None:
@@ -1298,6 +1411,8 @@ def _settings_snapshot(config: Config) -> Dict[str, object]:
         "merge_speakers": bool(config.merge_speakers),
         "merge_threshold": config.merge_threshold,
         "merge_min_coh": config.merge_min_coh,
+        "merge_attach_window": config.merge_attach_window,
+        "merge_split_min_segments": config.merge_split_min_segments,
         "chunk_seconds": config.chunk_seconds,
     }
 
@@ -2024,6 +2139,7 @@ def create_app(
         merge_speakers: Optional[bool] = Form(None),
         merge_threshold: Optional[float] = Form(None),
         merge_min_weight: Optional[float] = Form(None),
+        merge_attach_window: Optional[float] = Form(None),
         auto_start: bool = Form(True),
     ) -> Dict[str, object]:
         name = Path(file.filename or "audio.wav").name
@@ -2074,6 +2190,8 @@ def create_app(
             "merge_min_weight": settings.get("merge_min_weight"),
             "merge_segment_floor": settings.get("merge_segment_floor"),
             "merge_min_coh": settings.get("merge_min_coh", 0.0),
+            "merge_attach_window": settings.get("merge_attach_window", 2.0),
+            "merge_split_min_segments": settings.get("merge_split_min_segments", 50),
             "audio_enhance": settings.get("audio_enhance", True),
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
@@ -2111,6 +2229,11 @@ def create_app(
         ):
             recording.job_settings["merge_min_weight"] = float(merge_min_weight)
             config.merge_min_weight = float(merge_min_weight)
+        if isinstance(merge_attach_window, (int, float)) and not isinstance(
+            merge_attach_window, bool
+        ):
+            recording.job_settings["merge_attach_window"] = float(merge_attach_window)
+            config.merge_attach_window = float(merge_attach_window)
         lib.save(recording)
         if auto_start:
             processor.submit(recording, config)
@@ -2156,6 +2279,8 @@ def create_app(
             "merge_min_weight": settings.get("merge_min_weight"),
             "merge_segment_floor": settings.get("merge_segment_floor"),
             "merge_min_coh": settings.get("merge_min_coh", 0.0),
+            "merge_attach_window": settings.get("merge_attach_window", 2.0),
+            "merge_split_min_segments": settings.get("merge_split_min_segments", 50),
             "audio_enhance": settings.get("audio_enhance", True),
             "diar_threshold": settings.get("diar_threshold"),
             "diar_min_duration_on": settings.get("diar_min_duration_on"),
@@ -2207,6 +2332,11 @@ def create_app(
             if isinstance(body_dict.get("options"), dict)
             else {}
         )
+        if mode != "speakers":
+            # a full/transcribe pass rewrites the text, so an old speaker-only
+            # rollback map no longer describes the transcript
+            with contextlib.suppress(OSError):
+                _speakers_backup_path(lib, record_id).unlink(missing_ok=True)
 
         # remember the chosen options: the "process again" dialog pre-fills
         # from job_settings on the next run
@@ -2241,6 +2371,21 @@ def create_app(
             elapsed = processor.elapsed_sec(recording.id)
             if elapsed is not None:
                 payload["elapsed_sec"] = round(elapsed, 1)
+        backup = _load_speakers_backup(_speakers_backup_path(lib, record_id))
+        if backup and backup.get("after"):
+            # a speakers-only run left a sidecar: the UI can mark changed rows
+            # and offer a one-click return to the previous breakdown
+            payload["reprocess_undo"] = {
+                "available": bool(backup.get("before")),
+                "failed": bool(backup.get("failed")),
+                "created_at": backup.get("created_at"),
+                "finished_at": backup.get("finished_at"),
+                "before_speakers": backup.get("before_speakers"),
+                "after_speakers": backup.get("after_speakers"),
+                "moved": backup.get("moved"),
+                "changed": list(backup.get("changed") or []),
+                "dropped_names": list(backup.get("dropped_names") or []),
+            }
         return payload
 
     @app.patch("/api/recordings/{record_id}/meta")
@@ -2413,6 +2558,76 @@ def create_app(
         (lib.embeddings_dir / f"{record_id}.npz").unlink(missing_ok=True)
         lib.save(recording, create=False)
         lib.log(f"merge speakers {from_label} -> {into} ({moved} segments)")
+        return recording.to_dict()
+
+    @app.post("/api/recordings/{record_id}/speakers/undo")
+    def undo_speakers(record_id: str) -> Dict[str, object]:
+        """Restore the speaker map saved before the last speakers-only run.
+
+        Only ``segment.speaker`` and the label-keyed metadata are restored;
+        text, ids and times are never touched.  If the transcript itself was
+        edited after the run (split/merged rows, changed text), the old map no
+        longer matches and the request is refused instead of guessing.
+        """
+        recording = lib.load(record_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="Запись не найдена")
+        if recording.status in ("queued", "running"):
+            raise HTTPException(
+                status_code=409, detail="Идёт обработка — откатить разбивку нельзя"
+            )
+        backup_path = _speakers_backup_path(lib, record_id)
+        backup = _load_speakers_backup(backup_path)
+        before = backup.get("before") if backup else None
+        if not isinstance(before, dict):
+            raise HTTPException(
+                status_code=404, detail="Нет сохранённой разбивки для отката"
+            )
+        expected = backup.get("structure_after") or backup.get("structure")
+        if expected is not None and _structure_signature(recording.segments) != expected:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "После переобработки текст или границы реплик менялись — "
+                    "автоматический откат перезапишет эти правки. "
+                    "Отмените их через Ctrl+Z и попробуйте снова."
+                ),
+            )
+
+        # Prefer the full snapshot: a speakers-only run can also split a
+        # segment, and restoring only the speaker map would leave such rows
+        # behind.  The structure check above guarantees no hand edits are lost.
+        raw_segments = backup.get("segments")
+        if isinstance(raw_segments, list) and raw_segments:
+            recording.segments = [
+                Segment.from_dict(item)
+                for item in raw_segments
+                if isinstance(item, dict)
+            ]
+        else:
+            for segment in recording.segments:
+                if segment.id in before:
+                    segment.speaker = str(before[segment.id])
+        live = {segment.speaker for segment in recording.segments}
+        names = backup.get("names") if isinstance(backup.get("names"), dict) else {}
+        keep = backup.get("keep") if isinstance(backup.get("keep"), list) else []
+        match = backup.get("match") if isinstance(backup.get("match"), dict) else {}
+        recording.speaker_names = {
+            str(label): str(value) for label, value in names.items() if label in live
+        }
+        recording.speaker_keep = [str(label) for label in keep if label in live]
+        recording.speaker_match = {
+            str(label): value for label, value in match.items() if label in live
+        }
+        # the npz cache describes the discarded composition
+        (lib.embeddings_dir / f"{record_id}.npz").unlink(missing_ok=True)
+        recording.speakers_diff = "прежняя разбивка возвращена"
+        recording.edited_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        recording.done_at = None
+        lib.save(recording, create=False)
+        with contextlib.suppress(OSError):
+            backup_path.unlink(missing_ok=True)
+        lib.log(f"speakers rollback {recording.filename}")
         return recording.to_dict()
 
     @app.post("/api/recordings/{record_id}/cancel")
